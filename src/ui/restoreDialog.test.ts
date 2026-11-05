@@ -39,6 +39,7 @@ vi.mock("./notify", () => ({ toast: h.toast, showBanner: vi.fn(), hideBanner: vi
 import { setLocale } from "../i18n";
 import { app } from "../state/store";
 import { mountParamsPanel } from "./paramsPanel";
+import { installSnapshotStatus } from "./restoreDialog";
 
 const wait = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 const params = { maxDistanceM: 5, disappearDelayS: 30, triggerDb: Array(16).fill(40), microDb: Array(16).fill(30) };
@@ -52,6 +53,7 @@ const modal = () => document.querySelector(".modal");
 const modalBtn = (re: RegExp) => Array.from(document.querySelectorAll<HTMLButtonElement>(".modal button")).find((b) => re.test(b.textContent ?? ""))!;
 
 beforeEach(async () => {
+  app.set({ connection: "disconnected" }); // closes any modal left open by the previous test
   setLocale("en");
   for (const m of [h.readParams, h.writeParams, h.snapshotStatus, h.previewRestore, h.ask, h.toast]) m.mockReset();
   h.readParams.mockResolvedValue(restored);
@@ -174,4 +176,73 @@ it("restore_error_keeps_draft_and_toasts", async () => {
   expect(h.ask).toHaveBeenCalled(); // dirty draft: discard confirmation first
   expect(h.toast).toHaveBeenCalledWith("error", expect.stringContaining("disk full"));
   expect(app.get().draft).toEqual(draft);
+});
+
+it("restore_reconnect_while_confirmation_open_never_writes", async () => {
+  restoreBtn().click();
+  await wait();
+  modalBtn(/first connection/).click();
+  await wait();
+  expect(modalBtn(/^Restore$/)).toBeTruthy();
+  app.set({ connection: "disconnected", info: null });
+  app.set({ connection: "connected" });
+  await wait();
+  expect(modal()).toBeNull(); // closed on disconnect
+  expect(h.writeParams).not.toHaveBeenCalled();
+  expect(h.toast).not.toHaveBeenCalled();
+});
+
+it("refusing_the_dirty_discard_sends_nothing", async () => {
+  app.set({ draft: { ...params, maxDistanceM: 6 } });
+  h.ask.mockResolvedValue(false);
+  restoreBtn().click();
+  await wait();
+  modalBtn(/first connection/).click();
+  await wait();
+  modalBtn(/^Restore$/).click();
+  await wait();
+  expect(h.ask).toHaveBeenCalled();
+  expect(h.writeParams).not.toHaveBeenCalled();
+});
+
+it("double_click_on_restore_opens_one_dialog", async () => {
+  restoreBtn().click();
+  restoreBtn().click();
+  await wait();
+  expect(document.querySelectorAll(".modal").length).toBe(1);
+});
+
+it("snapshot_status_lifecycle", async () => {
+  installSnapshotStatus();
+  app.set({ snapshots: null, connection: "disconnected", info: null, sensor: null, draft: null });
+  const s1 = { ...status, originalError: "e1" };
+  h.snapshotStatus.mockResolvedValue(s1);
+  app.set({ connection: "connected" }); // refresh on connect, independent of the read
+  await wait();
+  expect(app.get().snapshots).toEqual(s1);
+  // refresh when the sensor values are reloaded (e.g. after a write)
+  const s2 = { ...status, originalError: "e2" };
+  h.snapshotStatus.mockResolvedValue(s2);
+  app.set({ sensor: params, draft: params });
+  await wait();
+  expect(app.get().snapshots).toEqual(s2);
+  // out-of-order: the older (slow) result must not overwrite the newer one
+  let slow!: (v: unknown) => void;
+  h.snapshotStatus.mockReturnValueOnce(new Promise((r) => { slow = r; }));
+  app.set({ sensor: { ...params } });
+  h.snapshotStatus.mockResolvedValue({ ...status, originalError: "newest" });
+  app.set({ sensor: { ...params } });
+  await wait();
+  slow({ ...status, originalError: "old" });
+  await wait();
+  expect(app.get().snapshots!.originalError).toBe("newest");
+  // stale across a reconnect, then cleared on disconnect
+  let late!: (v: unknown) => void;
+  h.snapshotStatus.mockReturnValueOnce(new Promise((r) => { late = r; }));
+  app.set({ sensor: { ...params } });
+  app.set({ connection: "disconnected", info: null });
+  expect(app.get().snapshots).toBeNull();
+  late({ ...status, originalError: "late" });
+  await wait();
+  expect(app.get().snapshots).toBeNull();
 });

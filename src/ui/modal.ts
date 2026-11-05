@@ -1,4 +1,5 @@
 import { onLocaleChange, renderI18n, t } from "../i18n";
+import { onDisconnect } from "../state/store";
 
 export interface ModalAction<V> {
   label: string;
@@ -17,12 +18,16 @@ export interface ModalOptions<V> {
 }
 
 let seq = 0;
+let closeCurrent: (() => void) | null = null;
+// a modal never outlives its connection
+onDisconnect(() => closeCurrent?.());
 
 /**
  * In-app modal. Resolves with the chosen action's value, or null on Esc / backdrop / close.
  * Focus moves to the first action and returns to the previous element on close.
  */
 export function openModal<V>(opts: ModalOptions<V>): Promise<V | null> {
+  if (closeCurrent) return Promise.resolve(null);
   const previous = document.activeElement as HTMLElement | null;
   const id = `modal-${++seq}`;
   const backdrop = document.createElement("div");
@@ -64,6 +69,7 @@ export function openModal<V>(opts: ModalOptions<V>): Promise<V | null> {
     const finish = (v: V | null) => {
       if (done) return;
       done = true;
+      closeCurrent = null;
       document.removeEventListener("keydown", onKey, true);
       off();
       backdrop.remove();
@@ -102,6 +108,7 @@ export function openModal<V>(opts: ModalOptions<V>): Promise<V | null> {
       renderI18n(dlg);
       x.setAttribute("aria-label", t("modal.close"));
     });
+    closeCurrent = () => finish(null);
     x.addEventListener("click", () => finish(null));
     backdrop.addEventListener("mousedown", (e) => { if (e.target === backdrop) finish(null); });
     document.addEventListener("keydown", onKey, true);

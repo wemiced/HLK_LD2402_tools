@@ -1,5 +1,7 @@
+import { ask } from "@tauri-apps/plugin-dialog";
 import { readParams, writeParams } from "../api";
 import { t } from "../i18n";
+import { isDirty } from "../state/draft";
 import { app, onConnected, onDisconnect } from "../state/store";
 import type { SensorParams } from "../types";
 import { errorMessageOf } from "./errors";
@@ -45,5 +47,15 @@ export async function performWrite(params: SensorParams, successKey: string): Pr
     toast("success", t(successKey));
   } catch (e) {
     if (isLive(ep)) toast("error", errorMessageOf(e));
+  }
+}
+
+/** True when it is safe to proceed (clean, or the user agreed to discard). */
+export async function confirmDiscardIfDirty(): Promise<boolean> {
+  if (!isDirty(app.get().sensor, app.get().draft)) return true;
+  try {
+    return await ask(t("params.confirmDiscard"), { title: t("params.discardTitle"), kind: "warning" });
+  } catch {
+    return false;
   }
 }

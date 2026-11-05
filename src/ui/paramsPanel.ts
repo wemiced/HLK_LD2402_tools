@@ -8,11 +8,11 @@ import { errorMessageOf } from "./errors";
 import { mountGateTable } from "./gateTable";
 import { toast } from "./notify";
 import { openRestoreDialog } from "./restoreDialog";
-import { currentEpoch, guarded, isLive, performWrite } from "./writeFlow";
+import { confirmDiscardIfDirty, currentEpoch, guarded, isLive, performWrite } from "./writeFlow";
 
 const TEMPLATE = `
 <div class="card">
-  <div class="row"><h3 data-i18n="params.title"></h3><div class="grow"></div>
+  <div class="row head"><h3 data-i18n="params.title"></h3><div class="grow"></div>
     <button class="btn ghost sm" data-role="restore" data-i18n="params.restore"></button>
     <button class="btn ghost sm" data-role="reload">↻ <span data-i18n="params.reread"></span></button></div>
   <div class="field">
@@ -40,15 +40,7 @@ const TEMPLATE = `
 
 const dirtyNow = () => isDirty(app.get().sensor, app.get().draft);
 
-/** True when it is safe to proceed (clean, or the user agreed to discard). */
-export async function confirmDiscardIfDirty(): Promise<boolean> {
-  if (!dirtyNow()) return true;
-  try {
-    return await ask(t("params.confirmDiscard"), { title: t("params.discardTitle"), kind: "warning" });
-  } catch {
-    return false;
-  }
-}
+export { confirmDiscardIfDirty };
 
 /** Intercept window close while there are unwritten changes. */
 export async function installCloseGuard(): Promise<void> {
