@@ -48,7 +48,9 @@ fn round_to(x: f32, scale: f64) -> f64 {
 const EPS: f64 = 1e-6;
 
 fn oor(field: &str) -> ConfigError {
-    ConfigError::OutOfRange { field: field.to_string() }
+    ConfigError::OutOfRange {
+        field: field.to_string(),
+    }
 }
 
 fn number_in(v: Option<&Value>, lo: f64, hi: f64, field: &str) -> Result<f64, ConfigError> {
@@ -59,7 +61,10 @@ fn number_in(v: Option<&Value>, lo: f64, hi: f64, field: &str) -> Result<f64, Co
 }
 
 fn db_array(v: Option<&Value>, name: &str) -> Result<[f32; 16], ConfigError> {
-    let arr = v.and_then(Value::as_array).filter(|a| a.len() == 16).ok_or_else(|| oor(name))?;
+    let arr = v
+        .and_then(Value::as_array)
+        .filter(|a| a.len() == 16)
+        .ok_or_else(|| oor(name))?;
     let mut out = [0.0f32; 16];
     for (i, item) in arr.iter().enumerate() {
         out[i] = number_in(Some(item), 0.0, 95.0, &format!("{name}[{i}]"))? as f32;
@@ -73,14 +78,25 @@ pub fn from_json(s: &str) -> Result<SensorParams, ConfigError> {
     if obj.get("format").and_then(Value::as_str) != Some(FORMAT) {
         return Err(ConfigError::NotAConfig);
     }
-    let version = obj.get("version").and_then(Value::as_u64).ok_or(ConfigError::NotAConfig)?;
+    let version = obj
+        .get("version")
+        .and_then(Value::as_u64)
+        .ok_or(ConfigError::NotAConfig)?;
     if version > u64::from(VERSION) {
         let version = u32::try_from(version).unwrap_or(u32::MAX);
         return Err(ConfigError::UnsupportedVersion { version });
     }
-    let params = obj.get("params").and_then(Value::as_object).ok_or_else(|| oor("params"))?;
+    let params = obj
+        .get("params")
+        .and_then(Value::as_object)
+        .ok_or_else(|| oor("params"))?;
     let max_distance_m = number_in(params.get("maxDistanceM"), 0.7, 10.0, "maxDistanceM")?;
-    let delay = number_in(params.get("disappearDelayS"), 0.0, 65535.0, "disappearDelayS")?;
+    let delay = number_in(
+        params.get("disappearDelayS"),
+        0.0,
+        65535.0,
+        "disappearDelayS",
+    )?;
     if delay.fract() != 0.0 {
         return Err(oor("disappearDelayS"));
     }
@@ -116,7 +132,7 @@ fn rfc3339_utc(secs: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     fn doc(params: Value) -> String {
         json!({"format":"ld2402-studio-config","version":1,"params":params}).to_string()
@@ -126,7 +142,9 @@ mod tests {
                "triggerDb":vec![40.0;16],"microDb":vec![30.0;16]})
     }
     fn oor(field: &str) -> ConfigError {
-        ConfigError::OutOfRange { field: field.into() }
+        ConfigError::OutOfRange {
+            field: field.into(),
+        }
     }
 
     #[test]
@@ -159,7 +177,10 @@ mod tests {
     #[test]
     fn rejects_future_version() {
         let s = json!({"format":"ld2402-studio-config","version":2,"params":good()}).to_string();
-        assert_eq!(from_json(&s), Err(ConfigError::UnsupportedVersion { version: 2 }));
+        assert_eq!(
+            from_json(&s),
+            Err(ConfigError::UnsupportedVersion { version: 2 })
+        );
     }
 
     #[test]
