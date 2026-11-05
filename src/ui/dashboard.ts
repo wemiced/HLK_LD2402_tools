@@ -159,6 +159,9 @@ export function mountDashboard(el: HTMLElement): void {
     const ep = ++epoch;
     lastPresentAt = null;
     firstFrameAt = null;
+    // The shell already confirmed discarding a dirty draft: never keep the
+    // previous session's values, even if the initial read below fails.
+    app.set({ sensor: null, draft: null });
     try {
       const params = await readParams();
       if (!live(ep)) return;

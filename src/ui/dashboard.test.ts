@@ -23,17 +23,22 @@ vi.mock("../api", () => ({
   ApiError: h.ApiError,
   readParams: h.readParams,
   setStreaming: h.setStreaming,
+  writeParams: vi.fn(),
+  exportConfig: vi.fn(),
+  importConfig: vi.fn(),
   onFrame: vi.fn(async (cb: (f: unknown) => void) => {
     h.frameCb = cb;
     return () => {};
   }),
 }));
 
+vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: vi.fn(), save: vi.fn(), open: vi.fn() }));
 vi.mock("./notify", () => ({ toast: h.toast, showBanner: vi.fn(), hideBanner: vi.fn() }));
 
 import { setLocale } from "../i18n";
 import { app } from "../state/store";
 import { dashboardSlot, mountDashboard } from "./dashboard";
+import { mountParamsPanel } from "./paramsPanel";
 
 const wait = (ms = 60) => new Promise((r) => setTimeout(r, ms));
 const params = {
@@ -128,4 +133,24 @@ it("disables pause/resume while a calibration is measuring", async () => {
   await wait();
   expect(pause.disabled).toBe(true);
   app.set({ calibrating: false });
+});
+
+it("reconnect with a failing initial read drops the previous session's params", async () => {
+  mountParamsPanel(dashboardSlot("params", el)!);
+  app.set({ connection: "connected" });
+  await wait();
+  expect(app.get().sensor).toEqual(params);
+  app.set({ connection: "disconnected" });
+  await wait();
+  h.toast.mockReset();
+  h.readParams.mockReset().mockRejectedValue(new h.ApiError({ kind: "busy" }));
+  app.set({ connection: "connected" });
+  await wait();
+  expect(app.get().sensor).toBeNull();
+  expect(app.get().draft).toBeNull();
+  expect(h.toast).toHaveBeenCalledWith("error", "The sensor is busy with another operation.");
+  const panel = dashboardSlot("params", el)!;
+  expect(panel.querySelector<HTMLButtonElement>('[data-role="write"]')!.disabled).toBe(true);
+  expect(panel.querySelector<HTMLInputElement>('[data-role="dist"]')!.disabled).toBe(true);
+  expect(panel.querySelector('[data-role="distVal"]')!.textContent).toBe("—");
 });
