@@ -142,10 +142,31 @@ it("auto_gain_disabled_on_old_fw", async () => {
   expect(b.title).toBe("Requires firmware 3.3.5 or later");
 });
 
+const modalBtn = (re: RegExp) => Array.from(document.querySelectorAll<HTMLButtonElement>(".modal button")).find((b) => re.test(b.textContent ?? ""))!;
+
+it("auto_gain_requires_confirmation", async () => {
+  const b = q<HTMLButtonElement>("autogain");
+  b.click();
+  await wait();
+  expect(document.querySelector(".modal")!.textContent).toContain("cannot undo it");
+  expect(h.autoGain).not.toHaveBeenCalled();
+  modalBtn(/^Cancel$/).click();
+  await wait();
+  expect(h.autoGain).not.toHaveBeenCalled();
+  expect(app.get().autoGaining).toBe(false);
+  b.click();
+  await wait();
+  modalBtn(/^Adjust gain$/).click();
+  await wait();
+  expect(h.autoGain).toHaveBeenCalledTimes(1);
+});
+
 it("auto gain shows busy state until done, then a success toast", async () => {
   const b = q<HTMLButtonElement>("autogain");
   expect(b.disabled).toBe(false);
   b.click();
+  await wait();
+  modalBtn(/^Adjust gain$/).click();
   await wait();
   expect(h.autoGain).toHaveBeenCalled();
   expect(b.disabled).toBe(true);
@@ -159,6 +180,8 @@ it("auto gain error toasts and resets", async () => {
   h.autoGain.mockRejectedValue(new h.ApiError({ kind: "busy" }));
   const b = q<HTMLButtonElement>("autogain");
   b.click();
+  await wait();
+  modalBtn(/^Adjust gain$/).click();
   await wait();
   expect(h.toast).toHaveBeenCalledWith("error", "The sensor is busy with another operation.");
   expect(b.disabled).toBe(false);
@@ -191,6 +214,8 @@ it("auto gain watchdog: no AutoGainDone within 30 s resets with an error toast",
     const b = q<HTMLButtonElement>("autogain");
     b.click();
     await vi.advanceTimersByTimeAsync(0);
+    modalBtn(/^Adjust gain$/).click();
+    await vi.advanceTimersByTimeAsync(0);
     expect(b.getAttribute("aria-busy")).toBe("true");
     await vi.advanceTimersByTimeAsync(30_001);
     expect(h.toast).toHaveBeenCalledWith("error", "The gain adjustment did not finish in time.");
@@ -215,6 +240,8 @@ it("auto gain, calibration and parameter I/O exclude each other", async () => {
   const gain = q<HTMLButtonElement>("autogain");
   const start = q<HTMLButtonElement>("start");
   gain.click();
+  await wait();
+  modalBtn(/^Adjust gain$/).click();
   await wait();
   expect(app.get().autoGaining).toBe(true);
   expect(start.disabled).toBe(true);

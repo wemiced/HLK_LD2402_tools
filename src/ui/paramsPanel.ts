@@ -1,16 +1,19 @@
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { exportConfig, importConfig, readParams, writeParams } from "../api";
+import { exportConfig, importConfig, readParams } from "../api";
 import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
 import { clampParams, isDirty } from "../state/draft";
-import { app, canEdit, onConnected, onDisconnect, subscribeState } from "../state/store";
+import { app, canEdit, subscribeState } from "../state/store";
 import { errorMessageOf } from "./errors";
 import { mountGateTable } from "./gateTable";
 import { toast } from "./notify";
+import { openRestoreDialog } from "./restoreDialog";
+import { currentEpoch, guarded, isLive, performWrite } from "./writeFlow";
 
 const TEMPLATE = `
 <div class="card">
   <div class="row"><h3 data-i18n="params.title"></h3><div class="grow"></div>
+    <button class="btn ghost sm" data-role="restore" data-i18n="params.restore"></button>
     <button class="btn ghost sm" data-role="reload">↻ <span data-i18n="params.reread"></span></button></div>
   <div class="field">
     <div class="top"><label for="p-dist" data-i18n="params.maxDistance"></label><span class="val" data-role="distVal"></span></div>
@@ -70,7 +73,7 @@ export function mountParamsPanel(el: HTMLElement): void {
   const q = <T extends HTMLElement>(role: string) => el.querySelector<T>(`[data-role="${role}"]`)!;
   const dist = q<HTMLInputElement>("dist"), delay = q<HTMLInputElement>("delay"), delayNum = q<HTMLInputElement>("delayNum");
   const distVal = q("distVal"), dirtyEl = q("dirty"), perm = q("perm");
-  const writeBtn = q<HTMLButtonElement>("write"), undoBtn = q<HTMLButtonElement>("undo"), reloadBtn = q<HTMLButtonElement>("reload");
+  const writeBtn = q<HTMLButtonElement>("write"), undoBtn = q<HTMLButtonElement>("undo"), reloadBtn = q<HTMLButtonElement>("reload"), restoreBtn = q<HTMLButtonElement>("restore");
   const exportBtn = q<HTMLButtonElement>("export"), importBtn = q<HTMLButtonElement>("import");
   const segBtns = Array.from(el.querySelectorAll<HTMLButtonElement>(".seg button"));
 
@@ -78,8 +81,7 @@ export function mountParamsPanel(el: HTMLElement): void {
   document.body.appendChild(drawer);
   const table = mountGateTable(drawer);
 
-  let epoch = 0;
-  const live = (e: number) => e === epoch && app.get().connection === "connected";
+  const live = isLive;
 
   function render(): void {
     const s = app.get();
@@ -104,6 +106,8 @@ export function mountParamsPanel(el: HTMLElement): void {
     writeBtn.disabled = blocked || !dirty || !connected;
     undoBtn.disabled = s.paramsBusy || !dirty;
     reloadBtn.disabled = blocked || !connected;
+    const snaps = s.snapshots;
+    restoreBtn.disabled = !canEdit(s) || !(snaps && (snaps.original || snaps.latestBackup));
     exportBtn.disabled = !p;
     importBtn.disabled = blocked || !connected || !s.sensor;
     segBtns.forEach((b) => b.classList.toggle("on", b.dataset.series === s.series));
@@ -126,36 +130,11 @@ export function mountParamsPanel(el: HTMLElement): void {
   segBtns.forEach((b) => b.addEventListener("click", () => app.set({ series: b.dataset.series as "trigger" | "micro" })));
   q("table").addEventListener("click", () => table.open());
 
-  async function guarded(fn: () => Promise<void>): Promise<void> {
-    const s = app.get();
-    if (s.paramsBusy || s.calibrating || s.autoGaining) return;
-    app.set({ paramsBusy: true });
-    try { await fn(); } finally { app.set({ paramsBusy: false }); }
-  }
-
   writeBtn.addEventListener("click", () => void guarded(async () => {
     const draft = app.get().draft;
-    if (!draft) return;
-    const ep = epoch;
-    try {
-      await writeParams(draft);
-      let fresh;
-      try {
-        fresh = await readParams();
-      } catch {
-        if (live(ep)) {
-          app.set({ sensor: draft, draft });
-          toast("error", t("params.writtenRereadFailed"));
-        }
-        return;
-      }
-      if (!live(ep)) return;
-      app.set({ sensor: fresh, draft: fresh });
-      toast("success", t("params.written"));
-    } catch (e) {
-      if (live(ep)) toast("error", errorMessageOf(e));
-    }
+    if (draft) await performWrite(draft, "params.written");
   }));
+  restoreBtn.addEventListener("click", () => void openRestoreDialog());
 
   undoBtn.addEventListener("click", () => {
     if (app.get().paramsBusy) return;
@@ -167,7 +146,7 @@ export function mountParamsPanel(el: HTMLElement): void {
       const ok = await ask(t("params.confirmReload"), { title: t("params.discardTitle"), kind: "warning" }).catch(() => false);
       if (!ok) return;
     }
-    const ep = epoch;
+    const ep = currentEpoch();
     try {
       const fresh = await readParams();
       if (live(ep)) app.set({ sensor: fresh, draft: fresh });
@@ -203,8 +182,6 @@ export function mountParamsPanel(el: HTMLElement): void {
   }));
 
   subscribeState(render);
-  onConnected(() => { epoch++; });
-  onDisconnect(() => { epoch++; });
   onLocaleChange(() => { renderI18n(el); render(); });
   renderI18n(el);
   render();

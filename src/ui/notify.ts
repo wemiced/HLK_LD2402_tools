@@ -54,3 +54,25 @@ export function installPowerBanner(): void {
   subscribeState(sync);
   sync();
 }
+
+/** Warning banner when the first-connection snapshot could not be saved; dismissible per connection. */
+export function installSnapshotBanner(): void {
+  let dismissed = false;
+  const sync = () => {
+    const s = app.get();
+    if (s.connection !== "connected") dismissed = false;
+    const err = s.connection === "connected" ? s.snapshots?.originalError : null;
+    const el = document.querySelector('[data-banner="snapshot"]');
+    if (!err) return hideBanner("snapshot");
+    if (dismissed) return;
+    const text = t("banner.snapshot.body", { message: err });
+    if (el && el.querySelector("span")?.textContent === text) return;
+    showBanner("snapshot", "warning", `⚠️ <b>${esc(t("banner.snapshot.title"))}</b> — <span>${esc(text)}</span><div class="grow"></div><button class="btn sm ghost">${esc(t("banner.dismiss"))}</button>`);
+    document.querySelector('[data-banner="snapshot"] button')?.addEventListener("click", () => {
+      dismissed = true;
+      hideBanner("snapshot");
+    });
+  };
+  subscribeState(sync);
+  sync();
+}

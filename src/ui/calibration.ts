@@ -3,6 +3,7 @@ import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
 import { isDirty } from "../state/draft";
 import { app, onDisconnect, subscribeState } from "../state/store";
 import { errorMessage, errorMessageOf } from "./errors";
+import { openModal } from "./modal";
 import { toast } from "./notify";
 import { confirmDiscardIfDirty } from "./paramsPanel";
 
@@ -242,6 +243,7 @@ export function mountCalibrationCard(el: HTMLElement): void {
   const btn = q<HTMLButtonElement>("autogain");
   const setBusy = (on: boolean) => { if (app.get().autoGaining !== on) app.set({ autoGaining: on }); };
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let confirming = false;
   const clear = () => { if (timer) clearTimeout(timer); timer = null; };
 
   function render(): void {
@@ -259,7 +261,21 @@ export function mountCalibrationCard(el: HTMLElement): void {
 
   q("launch").addEventListener("click", () => app.set({ view: "calibration" }));
   btn.addEventListener("click", async () => {
-    if (btn.disabled) return;
+    if (btn.disabled || confirming) return;
+    confirming = true;
+    const body = document.createElement("p");
+    body.textContent = t("calib.autoGainConfirmBody");
+    const ok = await openModal<boolean>({
+      title: t("calib.autoGainConfirmTitle"),
+      tone: "warning",
+      body,
+      actions: [
+        { label: t("calib.autoGainCancel"), kind: "ghost", value: false },
+        { label: t("calib.autoGainConfirm"), kind: "primary", value: true },
+      ],
+    });
+    confirming = false;
+    if (!ok || btn.disabled) return;
     setBusy(true);
     clear();
     timer = setTimeout(() => {

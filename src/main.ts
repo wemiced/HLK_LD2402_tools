@@ -9,8 +9,9 @@ import { initLocale } from "./i18n";
 import { mountCalibration, mountCalibrationCard } from "./ui/calibration";
 import { dashboardSlot, mountDashboard } from "./ui/dashboard";
 import { mountFirmware } from "./ui/firmware";
-import { installPowerBanner } from "./ui/notify";
+import { installPowerBanner, installSnapshotBanner } from "./ui/notify";
 import { installCloseGuard, mountParamsPanel } from "./ui/paramsPanel";
+import { installSnapshotStatus } from "./ui/restoreDialog";
 import { mountShell } from "./ui/shell";
 
 mountShell(document.getElementById("app")!);
@@ -21,4 +22,6 @@ void installCloseGuard();
 mountCalibration(document.querySelector<HTMLElement>('section[data-view="calibration"]')!);
 mountCalibrationCard(dashboardSlot("calib")!);
 installPowerBanner();
+installSnapshotStatus();
+installSnapshotBanner();
 mountFirmware(document.querySelector<HTMLElement>('section[data-view="firmware"]')!);

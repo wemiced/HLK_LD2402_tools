@@ -1,4 +1,4 @@
-import type { DeviceInfo, FrameDto, SensorParams } from "../types";
+import type { DeviceInfo, FrameDto, SensorParams, SnapshotStatus } from "../types";
 
 export function createStore<T extends object>(initial: T) {
   let state = initial;
@@ -37,6 +37,8 @@ export interface AppState {
   paramsBusy: boolean;
   lastFrame: FrameDto | null;
   series: "trigger" | "micro";
+  /** Snapshot availability for the connected sensor (null until fetched). */
+  snapshots: SnapshotStatus | null;
 }
 
 export const app = createStore<AppState>({
@@ -52,6 +54,7 @@ export const app = createStore<AppState>({
   paramsBusy: false,
   lastFrame: null,
   series: "trigger",
+  snapshots: null,
 });
 
 /** True when an update changed nothing but the live frame (10 Hz): most views can skip it. */

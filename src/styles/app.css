@@ -123,3 +123,24 @@ tr.off td{opacity:.4}
 @keyframes spin{to{transform:rotate(360deg)}}
 .banner .grow{flex:1}
 section[data-view="calibration"] .card{align-self:start}
+/* modal */
+.modal-backdrop{position:fixed;inset:0;background:rgba(5,8,12,.55);backdrop-filter:blur(3px);display:grid;place-items:center;padding:16px;z-index:60}
+.modal{width:min(480px,100%);max-height:calc(100vh - 32px);overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:0 24px 60px rgba(0,0,0,.45);padding:20px}
+.modal h3{font-size:15px;font-weight:600}
+.modal h3.warn{color:var(--micro)}
+.modal-body{margin:12px 0 18px;font-size:13px;line-height:1.5}
+.modal-stack{display:flex;flex-direction:column;gap:10px}
+.modal-stack p{margin:0}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px}
+.modal-actions.stack{flex-direction:column;align-items:stretch}
+.btn.danger{background:var(--present);border-color:var(--present);color:#fff}
+.btn.danger:hover{filter:brightness(1.08)}
+.btn.option{flex-direction:column;align-items:flex-start;gap:2px;padding:12px 14px;background:var(--surface-2);text-align:left}
+.btn.option:hover,.btn.option:focus-visible{border-color:var(--accent);background:var(--accent-soft)}
+.btn.option small{color:var(--muted);font-weight:400;font-size:12px}
+.modal-actions.stack .btn.ghost{align-self:flex-end}
+.callout{padding:10px 12px;border-radius:10px;font-size:13px;border:1px solid}
+.callout.danger{background:var(--present-soft);border-color:var(--present);color:var(--present);font-weight:500}
+.callout.warn{background:rgba(255,180,84,.12);border-color:var(--micro)}
+.callout ul.clamped{margin:8px 0 0;padding-left:18px;font-size:12px}
+.callout ul.clamped li{margin:2px 0}
