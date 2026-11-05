@@ -82,6 +82,7 @@
   "errors.unsupported": "{feature} n'est pas pris en charge par ce firmware (nécessite {required}).",
   "errors.disconnected": "Le capteur a été déconnecté.",
   "errors.busy": "Le capteur est occupé par une autre opération.",
+  "errors.forbidden": "Commande hors du protocole LD2402 bloquée ({word}). Rien n'a été envoyé.",
   "errors.io": "Erreur de communication : {message}",
   "errors.unknown": "Erreur inattendue.",
   "errors.config.notAConfig": "Ce fichier n'est pas une configuration LD2402.",

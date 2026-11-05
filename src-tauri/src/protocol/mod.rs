@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod convert;
 pub mod frame;
+pub mod safety;
 
 #[cfg(test)]
 pub(crate) mod test_util {

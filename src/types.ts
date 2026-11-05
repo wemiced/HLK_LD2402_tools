@@ -57,6 +57,7 @@ export type DeviceError =
   | { kind: "unsupported"; feature: string; required: string }
   | { kind: "disconnected" }
   | { kind: "busy" }
+  | { kind: "forbidden"; word: number }
   | { kind: "io"; message: string };
 
 export type ConfigError =

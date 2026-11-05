@@ -52,6 +52,8 @@ pub enum DeviceError {
     Disconnected,
     #[error("device is busy")]
     Busy,
+    #[error("command {word:#06x} is outside the LD2402 protocol and was not sent")]
+    Forbidden { word: u16 },
     #[error("I/O error: {message}")]
     Io { message: String },
 }
@@ -142,6 +144,10 @@ impl Link {
     fn request(&self, word: u16, value: &[u8], timeout: Duration, attempts: u32) -> Reply {
         if self.dead.load(Ordering::SeqCst) {
             return Err(DeviceError::Disconnected);
+        }
+        if let Err(f) = crate::protocol::safety::check(word, value) {
+            eprintln!("blocked command {:#06x}: {}", f.word, f.reason);
+            return Err(DeviceError::Forbidden { word: f.word });
         }
         let (reply, rx) = mpsc::channel();
         let req = Request {
@@ -390,6 +396,15 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Device {
+    #[cfg(test)]
+    pub(crate) fn raw_cmd_for_tests(
+        &self,
+        word: u16,
+        value: &[u8],
+    ) -> Result<Vec<u8>, DeviceError> {
+        self.link.cmd(word, value)
+    }
+
     pub fn open(
         t: Box<dyn Transport>,
         on_event: Box<dyn Fn(DeviceEvent) + Send>,
@@ -606,5 +621,7 @@ impl Drop for Device {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;

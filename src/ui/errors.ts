@@ -10,7 +10,7 @@ export function errorMessage(data: Record<string, unknown>): string {
     const feature = "features." + String(data.feature);
     params.feature = t(feature) === feature ? String(data.feature) : t(feature);
   }
-  if ((kind === "timeout" || kind === "nack") && typeof data.word === "number") {
+  if ((kind === "timeout" || kind === "nack" || kind === "forbidden") && typeof data.word === "number") {
     params.word = "0x" + data.word.toString(16).toUpperCase().padStart(4, "0");
   }
   const key = "errors." + kind;

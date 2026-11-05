@@ -414,3 +414,34 @@ fn failed_auto_gain_is_not_busy() {
     );
     assert_eq!(d.read_params(), Ok(h.params()));
 }
+
+fn open_recording() -> (Device, super::test_support::Frames) {
+    let t = super::test_support::RecordingTransport::new(SimOptions::default());
+    let frames = t.frames_handle();
+    let d = Device::open(Box::new(t), Box::new(|_| {})).expect("open");
+    (d, frames)
+}
+
+fn guard_case(word: u16, value: &[u8]) {
+    let (d, frames) = open_recording();
+    let before = frames.lock().unwrap().len();
+    assert_eq!(
+        d.raw_cmd_for_tests(word, value),
+        Err(DeviceError::Forbidden { word })
+    );
+    assert_eq!(
+        frames.lock().unwrap().len(),
+        before,
+        "no byte may be written"
+    );
+}
+
+#[test]
+fn guard_blocks_out_of_range_write() {
+    guard_case(0x0007, &[0x01, 0, 0x78, 0, 0, 0]);
+}
+
+#[test]
+fn guard_blocks_unknown_word() {
+    guard_case(0x00A0, &[]);
+}

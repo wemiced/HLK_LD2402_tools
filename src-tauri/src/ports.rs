@@ -41,20 +41,24 @@ fn wait_ack(
 }
 
 /// Checks whether the transport talks like an LD2402. Always sends end-config.
+fn guarded_write(t: &mut dyn Transport, word: u16, value: &[u8]) -> bool {
+    crate::protocol::safety::check(word, value).is_ok()
+        && t.write_all(&encode_command(word, value)).is_ok()
+}
+
 pub fn probe(t: &mut dyn Transport, timeout_ms: u64) -> bool {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut dec = FrameDecoder::new();
     let mut ok = false;
-    if t.write_all(&encode_command(CMD_ENABLE_CONFIG, &[0x01, 0x00]))
-        .is_ok()
+    if guarded_write(t, CMD_ENABLE_CONFIG, &[0x01, 0x00])
         && wait_ack(t, &mut dec, CMD_ENABLE_CONFIG, deadline)
             .is_some_and(|f| parse_status(&f).is_ok())
-        && t.write_all(&encode_command(CMD_READ_VERSION, &[])).is_ok()
+        && guarded_write(t, CMD_READ_VERSION, &[])
     {
         ok = wait_ack(t, &mut dec, CMD_READ_VERSION, deadline)
             .is_some_and(|f| parse_status(&f).and_then(parse_version_ack).is_ok());
     }
-    if t.write_all(&encode_command(CMD_END_CONFIG, &[])).is_ok() {
+    if guarded_write(t, CMD_END_CONFIG, &[]) {
         wait_ack(t, &mut dec, CMD_END_CONFIG, deadline);
     }
     ok
