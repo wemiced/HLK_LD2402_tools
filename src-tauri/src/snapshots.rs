@@ -95,9 +95,18 @@ fn compact_ts(secs: u64) -> String {
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Write `content` to a unique tmp file (synced), then publish it at `path`
-/// with a hard link, which fails instead of replacing an existing file.
+/// with a hard link, which fails instead of replacing an existing file
+/// (falling back to an exclusive create where hard links are unavailable).
 /// Returns Ok(false) when `path` already exists (left untouched).
 fn publish_new(path: &Path, content: &str) -> Result<bool, String> {
+    publish_with(path, content, |a, b| std::fs::hard_link(a, b))
+}
+
+fn publish_with(
+    path: &Path,
+    content: &str,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<bool, String> {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -119,13 +128,35 @@ fn publish_new(path: &Path, content: &str) -> Result<bool, String> {
         let _ = std::fs::remove_file(&tmp);
         return Err(werr(&tmp, e));
     }
-    let res = std::fs::hard_link(&tmp, path);
+    let res = link(&tmp, path);
     let _ = std::fs::remove_file(&tmp);
     match res {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-        Err(e) => Err(werr(path, e)),
+        // No hard links here (FAT, some network shares): exclusive create.
+        Err(_) => create_new(path, content),
     }
+}
+
+/// Writes `content` to `path` only if it does not exist yet (Ok(false)
+/// otherwise, file untouched). A partial file is removed on error.
+fn create_new(path: &Path, content: &str) -> Result<bool, String> {
+    let werr = |e: std::io::Error| format!("cannot write {}: {e}", path.display());
+    let mut f = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(e) => return Err(werr(e)),
+    };
+    if let Err(e) = f.write_all(content.as_bytes()).and_then(|()| f.sync_all()) {
+        drop(f);
+        let _ = std::fs::remove_file(path);
+        return Err(werr(e));
+    }
+    Ok(true)
 }
 
 fn saved_at_of(path: &Path) -> Option<String> {
@@ -431,6 +462,40 @@ mod tests {
             .map(|e| e.unwrap().file_name().into_string().unwrap())
             .collect();
         assert_eq!(names, vec!["original.json".to_string()]);
+    }
+
+    /// Filesystems without hard links (FAT, some network shares) fall back
+    /// to an exclusive create that still never replaces an existing file.
+    #[test]
+    fn publish_falls_back_without_hard_links() {
+        use std::io::{Error, ErrorKind};
+        let dir = tempfile::tempdir().unwrap();
+        for (i, kind) in [
+            ErrorKind::Unsupported,
+            ErrorKind::PermissionDenied,
+            ErrorKind::Other,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let no_links = move |_: &Path, _: &Path| Err(Error::from(kind));
+            let path = dir.path().join(format!("snap{i}.json"));
+            assert_eq!(publish_with(&path, "first", no_links), Ok(true), "{kind:?}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "first");
+            assert_eq!(
+                publish_with(&path, "second", no_links),
+                Ok(false),
+                "{kind:?}"
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "first");
+        }
+        // No tmp file is left behind.
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert!(names.iter().all(|n| !n.ends_with(".tmp")), "{names:?}");
+        assert_eq!(names.len(), 3);
     }
 
     #[test]
