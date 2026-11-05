@@ -163,3 +163,25 @@ it("a port held by another program gets its own message", async () => {
     "/dev/ttyUSB0 is in use by another program (serial monitor, Arduino IDE, ModemManager…). Close it and try again.",
   );
 });
+
+it("refresh keeps the selected port and is disabled unless disconnected", async () => {
+  const sel = root.querySelector<HTMLSelectElement>("#port-select")!;
+  const refresh = root.querySelector<HTMLButtonElement>("#refresh-ports")!;
+  sel.value = "/dev/ttyACM0";
+  sel.dispatchEvent(new Event("change"));
+  await flush();
+  refresh.click();
+  await flush();
+  expect(sel.value).toBe("/dev/ttyACM0");
+  // the selected port vanished: fall back to the detected one
+  h.listPorts.mockResolvedValue([h.ports[1]]);
+  refresh.click();
+  await flush();
+  expect(sel.value).toBe("/dev/ttyUSB0");
+  h.listPorts.mockResolvedValue(h.ports);
+  expect(refresh.disabled).toBe(false);
+  connectBtn().click();
+  await flush();
+  expect(app.get().connection).toBe("connected");
+  expect(refresh.disabled).toBe(true);
+});

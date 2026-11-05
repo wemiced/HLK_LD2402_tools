@@ -54,6 +54,7 @@ export function mountShell(root: HTMLElement): void {
 
   // --- ports
   async function refreshPorts(): Promise<void> {
+    const keep = select.value;
     let ports: Awaited<ReturnType<typeof listPorts>> = [];
     try { ports = await listPorts(true); } catch { /* keep empty list */ }
     select.innerHTML = "";
@@ -64,7 +65,9 @@ export function mountShell(root: HTMLElement): void {
       o.dataset.label = p.label;
       select.appendChild(o);
     }
-    const first = ports.find((p) => p.detected === true) ?? ports[0];
+    // keep the user's choice while it is still listed; otherwise preselect
+    const kept = ports.find((p) => p.path === keep);
+    const first = kept ?? ports.find((p) => p.detected === true) ?? ports[0];
     if (first) select.value = first.path;
     renderPortLabels();
     update();
@@ -98,6 +101,7 @@ export function mountShell(root: HTMLElement): void {
     connectBtn.disabled = s.connection === "connecting" || (s.connection === "disconnected" && !select.value);
     connectBtn.textContent = t(s.connection === "connected" ? "conn.disconnect" : s.connection === "connecting" ? "conn.connecting" : "conn.connect");
     select.disabled = s.connection !== "disconnected";
+    $<HTMLButtonElement>("#refresh-ports").disabled = s.connection !== "disconnected";
   }
 
   // --- connection flow
@@ -127,7 +131,9 @@ export function mountShell(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>(".rail [data-view]").forEach((b) =>
     b.addEventListener("click", () => app.set({ view: b.dataset.view as ViewId })),
   );
-  $("#refresh-ports").addEventListener("click", () => void refreshPorts());
+  $("#refresh-ports").addEventListener("click", () => {
+    if (app.get().connection === "disconnected") void refreshPorts();
+  });
   connectBtn.addEventListener("click", () => void toggleConnection());
   let lastPort = "";
   select.addEventListener("focus", () => { lastPort = select.value; });
