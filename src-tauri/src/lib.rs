@@ -1,3 +1,4 @@
+pub mod config_file;
 pub mod device;
 pub mod ports;
 pub mod protocol;
