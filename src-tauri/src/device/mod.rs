@@ -56,7 +56,12 @@ pub enum DeviceError {
     Forbidden { word: u16 },
     #[error("I/O error: {message}")]
     Io { message: String },
+    #[error("could not back up the current settings: {message}")]
+    BackupFailed { message: String },
 }
+
+/// Saves the sensor's current values before a change; `Err` blocks the change.
+pub type BackupFn<'a> = dyn Fn(&SensorParams) -> Result<(), String> + 'a;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -520,30 +525,57 @@ impl Device {
         r
     }
 
-    pub fn read_params(&self) -> Result<SensorParams, DeviceError> {
-        let _g = self.begin()?;
-        self.in_config(true, |buffer| {
-            let mut pairs = vec![];
-            for chunk in all_param_ids().chunks(read_chunk_size(buffer)) {
-                let rest = self.link.cmd(CMD_READ_PARAMS, &read_params_value(chunk))?;
-                let vals = parse_param_values(&rest, chunk.len()).map_err(proto_err)?;
-                pairs.extend(chunk.iter().copied().zip(vals));
-            }
-            pairs_to_params(&pairs).map_err(proto_err)
-        })
+    /// Chunked read of every parameter; config mode must already be on.
+    fn read_all(&self, buffer: u16) -> Result<SensorParams, DeviceError> {
+        let mut pairs = vec![];
+        for chunk in all_param_ids().chunks(read_chunk_size(buffer)) {
+            let rest = self.link.cmd(CMD_READ_PARAMS, &read_params_value(chunk))?;
+            let vals = parse_param_values(&rest, chunk.len()).map_err(proto_err)?;
+            pairs.extend(chunk.iter().copied().zip(vals));
+        }
+        pairs_to_params(&pairs).map_err(proto_err)
     }
 
+    /// Writes (and saves when capable); config mode must already be on.
+    fn write_all(&self, buffer: u16, p: &SensorParams) -> Result<(), DeviceError> {
+        for chunk in params_to_pairs(p).chunks(write_chunk_size(buffer)) {
+            self.link
+                .cmd(CMD_WRITE_PARAMS, &write_params_value(chunk))?;
+        }
+        if self.info.capabilities.permanent_save {
+            self.link.cmd(CMD_SAVE, &[])?;
+        }
+        Ok(())
+    }
+
+    /// Reads the current values and hands them to `backup`, in config mode.
+    fn back_up(&self, buffer: u16, backup: &BackupFn<'_>) -> Result<(), DeviceError> {
+        let current = self.read_all(buffer)?;
+        backup(&current).map_err(|message| DeviceError::BackupFailed { message })
+    }
+
+    pub fn read_params(&self) -> Result<SensorParams, DeviceError> {
+        let _g = self.begin()?;
+        self.in_config(true, |buffer| self.read_all(buffer))
+    }
+
+    /// Unguarded write; the app uses `write_params_guarded`.
     pub fn write_params(&self, p: &SensorParams) -> Result<(), DeviceError> {
         let _g = self.begin()?;
+        self.in_config(true, |buffer| self.write_all(buffer, p))
+    }
+
+    /// In one config session: read the current values, back them up, then
+    /// write. A failed backup ends config and nothing is written.
+    pub fn write_params_guarded(
+        &self,
+        p: &SensorParams,
+        backup: &BackupFn<'_>,
+    ) -> Result<(), DeviceError> {
+        let _g = self.begin()?;
         self.in_config(true, |buffer| {
-            for chunk in params_to_pairs(p).chunks(write_chunk_size(buffer)) {
-                self.link
-                    .cmd(CMD_WRITE_PARAMS, &write_params_value(chunk))?;
-            }
-            if self.info.capabilities.permanent_save {
-                self.link.cmd(CMD_SAVE, &[])?;
-            }
-            Ok(())
+            self.back_up(buffer, backup)?;
+            self.write_all(buffer, p)
         })
     }
 
@@ -555,9 +587,31 @@ impl Device {
         Ok(())
     }
 
+    /// Unguarded calibration; the app uses `start_calibration_guarded`.
     pub fn start_calibration(&self, c: CalibCoefficients) -> Result<(), DeviceError> {
         let _g = self.begin()?;
         self.enable_config()?;
+        self.calibrate_in_config(c)
+    }
+
+    /// Backs up the current values in the same config session before
+    /// CALIB_START. A failed backup ends config and calibration is not sent.
+    pub fn start_calibration_guarded(
+        &self,
+        c: CalibCoefficients,
+        backup: &BackupFn<'_>,
+    ) -> Result<(), DeviceError> {
+        let _g = self.begin()?;
+        let buffer = self.enable_config()?;
+        if let Err(e) = self.back_up(buffer, backup) {
+            let _ = self.link.quick(CMD_END_CONFIG, &[]);
+            return Err(e);
+        }
+        self.calibrate_in_config(c)
+    }
+
+    /// Sends CALIB_START (config already on) and starts the progress helper.
+    fn calibrate_in_config(&self, c: CalibCoefficients) -> Result<(), DeviceError> {
         let value = calib_value(c.trigger, c.hold, c.micro);
         if let Err(e) = self.link.once(CMD_CALIB_START, &value) {
             let _ = self.link.quick(CMD_END_CONFIG, &[]);

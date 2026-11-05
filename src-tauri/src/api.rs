@@ -1,15 +1,17 @@
 //! Tauri command and event layer: thin DTO mapping over the device core.
-use crate::config_file::{self, ConfigError};
+use crate::config_file::{self, ClampedField, ConfigError};
 use crate::device::{CalibCoefficients, Device, DeviceError, DeviceEvent, DeviceInfo};
 use crate::ports::{self, PortInfo};
 use crate::protocol::commands::{CMD_READ_VERSION, SensorParams};
 use crate::protocol::convert::raw_to_db;
 use crate::protocol::frame::RawEngineering;
 use crate::sim::{SimOptions, SimSensor};
+use crate::snapshots::{SnapshotKind, SnapshotMeta, SnapshotStore, serial_key};
 use crate::transport::{Transport, open_serial};
 use serde::Serialize;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::SystemTime;
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Serialised frame for the UI.
@@ -80,42 +82,196 @@ fn io_err(e: std::io::Error) -> ApiErrorDto {
 
 type ApiResult<T> = Result<T, ApiErrorDto>;
 
+/// Snapshot state of the connected sensor, for the UI.
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotStatus {
+    pub original: Option<SnapshotMeta>,
+    pub latest_backup: Option<SnapshotMeta>,
+    pub unknown_serial: bool,
+    pub original_error: Option<String>,
+}
+
+/// A snapshot loaded for the restore confirmation (values already clamped).
+#[derive(Serialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestorePreview {
+    pub meta: SnapshotMeta,
+    pub params: SensorParams,
+    pub clamped: Vec<ClampedField>,
+    pub unknown_serial: bool,
+}
+
+fn is_unknown_serial(serial: &str) -> bool {
+    serial_key(serial) == "unknown"
+}
+
+/// For a blank serial, only backups taken during this connection count.
+fn backup_not_before(serial: &str, connected_at: SystemTime) -> Option<SystemTime> {
+    is_unknown_serial(serial).then_some(connected_at)
+}
+
+pub fn snapshot_status_for(
+    store: Option<&SnapshotStore>,
+    serial: &str,
+    connected_at: SystemTime,
+    original_error: Option<String>,
+) -> SnapshotStatus {
+    SnapshotStatus {
+        original: store.and_then(|st| st.original(serial)),
+        latest_backup: store
+            .and_then(|st| st.latest_backup(serial, backup_not_before(serial, connected_at))),
+        unknown_serial: is_unknown_serial(serial),
+        original_error,
+    }
+}
+
+pub fn restore_preview(
+    store: Option<&SnapshotStore>,
+    serial: &str,
+    kind: SnapshotKind,
+    connected_at: SystemTime,
+) -> Result<RestorePreview, DeviceError> {
+    let store = store.ok_or_else(|| DeviceError::Io {
+        message: NO_STORE.into(),
+    })?;
+    let meta = match kind {
+        SnapshotKind::Original => store.original(serial),
+        SnapshotKind::Backup => {
+            store.latest_backup(serial, backup_not_before(serial, connected_at))
+        }
+    }
+    .ok_or_else(|| DeviceError::Io {
+        message: match kind {
+            SnapshotKind::Original => "no first-connection snapshot is saved for this sensor",
+            SnapshotKind::Backup => "no backup is available for this sensor",
+        }
+        .into(),
+    })?;
+    let (params, clamped) = store
+        .load(serial, &meta)
+        .map_err(|message| DeviceError::Io { message })?;
+    Ok(RestorePreview {
+        meta,
+        params,
+        clamped,
+        unknown_serial: is_unknown_serial(serial),
+    })
+}
+
+const NO_STORE: &str = "snapshots are unavailable: no app data directory";
+
+/// The connected device and what is known about this connection.
+struct Conn {
+    gen_id: u64,
+    device: Device,
+    connected_at: SystemTime,
+    original_error: Option<String>,
+}
+
 /// The connected device, tagged with a generation so a stale disconnect
 /// notification can never drop a newer connection.
 #[derive(Default)]
 pub struct AppState {
-    slot: Mutex<Option<(u64, Device)>>,
+    slot: Mutex<Option<Conn>>,
     next_gen: AtomicU64,
+    /// Set once at startup; unset when the app data dir is unavailable,
+    /// in which case every backup fails and changes are refused.
+    store: OnceLock<SnapshotStore>,
 }
 
 impl AppState {
-    fn lock(&self) -> MutexGuard<'_, Option<(u64, Device)>> {
+    fn lock(&self) -> MutexGuard<'_, Option<Conn>> {
         self.slot.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn take(&self) -> Option<Device> {
-        self.lock().take().map(|(_, d)| d)
+        self.lock().take().map(|c| c.device)
+    }
+
+    /// Sets the snapshot store root (first call wins).
+    pub fn set_store(&self, store: SnapshotStore) {
+        let _ = self.store.set(store);
+    }
+
+    fn store(&self) -> Option<&SnapshotStore> {
+        self.store.get()
+    }
+
+    /// Saves a pre-change backup of `current`; Err blocks the change.
+    fn backup(&self, serial: &str, fw: &str, current: &SensorParams) -> Result<(), String> {
+        self.store()
+            .ok_or_else(|| NO_STORE.to_string())?
+            .save_backup(serial, fw, current)
+            .map(drop)
     }
 
     /// Runs `f` on the device, or fails with `Disconnected`.
     fn with<T>(&self, f: impl FnOnce(&Device) -> Result<T, DeviceError>) -> ApiResult<T> {
         let g = self.lock();
-        let (_, d) = g.as_ref().ok_or(DeviceError::Disconnected)?;
-        Ok(f(d)?)
+        let c = g.as_ref().ok_or(DeviceError::Disconnected)?;
+        Ok(f(&c.device)?)
+    }
+
+    /// Serial and connection time of the current device.
+    fn session(&self) -> Result<(String, SystemTime, Option<String>), DeviceError> {
+        let g = self.lock();
+        let c = g.as_ref().ok_or(DeviceError::Disconnected)?;
+        Ok((
+            c.device.info().serial,
+            c.connected_at,
+            c.original_error.clone(),
+        ))
     }
 
     /// Stores a freshly opened device, unless its link already died: its
     /// disconnect notification may have run before the device was stored.
     /// Checked under the lock, so a later death always finds it to drop.
-    fn install(&self, gen_id: u64, device: Device) -> Result<(), DeviceError> {
+    fn install(
+        &self,
+        gen_id: u64,
+        device: Device,
+        connected_at: SystemTime,
+    ) -> Result<(), DeviceError> {
         let mut g = self.lock();
         if !device.is_alive() {
             drop(g);
             drop(device);
             return Err(DeviceError::Disconnected);
         }
-        *g = Some((gen_id, device));
+        *g = Some(Conn {
+            gen_id,
+            device,
+            connected_at,
+            original_error: None,
+        });
         Ok(())
+    }
+
+    /// Reads the sensor and saves its first-connection snapshot if none
+    /// exists yet. Failures are recorded for the UI, never returned.
+    fn save_original(&self, gen_id: u64) {
+        let r = self
+            .with(|d| {
+                let p = d.read_params()?;
+                let info = d.info();
+                Ok((p, info))
+            })
+            .map_err(|e| match e {
+                ApiErrorDto::Device(d) => d.to_string(),
+                ApiErrorDto::Config(c) => c.error.to_string(),
+            })
+            .and_then(|(p, info)| {
+                self.store()
+                    .ok_or_else(|| NO_STORE.to_string())?
+                    .save_original_if_absent(&info.serial, &info.firmware, &p)
+            });
+        if let Err(e) = r {
+            let mut g = self.lock();
+            if let Some(c) = g.as_mut().filter(|c| c.gen_id == gen_id) {
+                c.original_error = Some(e);
+            }
+        }
     }
 
     /// Best-effort shutdown, used on app exit.
@@ -201,6 +357,7 @@ pub async fn connect(app: AppHandle, path: String) -> ApiResult<DeviceInfo> {
         let state = app2.state::<AppState>();
         // Close any previous device first (outside the lock while joining).
         state.close();
+        let connected_at = SystemTime::now();
         let gen_id = state.next_gen.fetch_add(1, Ordering::SeqCst) + 1;
         let cb_app = app2.clone();
         let transport = open_transport(&path)?;
@@ -219,7 +376,7 @@ pub async fn connect(app: AppHandle, path: String) -> ApiResult<DeviceInfo> {
                         let dev = {
                             let mut g = state.lock();
                             match g.as_ref() {
-                                Some((g_id, _)) if *g_id == gen_id => g.take(),
+                                Some(c) if c.gen_id == gen_id => g.take(),
                                 _ => None,
                             }
                         };
@@ -230,7 +387,8 @@ pub async fn connect(app: AppHandle, path: String) -> ApiResult<DeviceInfo> {
         )
         .map_err(|e| open_error(e, &path))?;
         let info = device.info();
-        state.install(gen_id, device)?;
+        state.install(gen_id, device, connected_at)?;
+        state.save_original(gen_id);
         Ok::<_, ApiErrorDto>(info)
     })
     .await
@@ -263,7 +421,13 @@ pub async fn read_params(app: AppHandle) -> ApiResult<SensorParams> {
 
 #[tauri::command]
 pub async fn write_params(app: AppHandle, params: SensorParams) -> ApiResult<()> {
-    blocking(app, move |s| s.with(|d| d.write_params(&params))).await
+    blocking(app, move |s| {
+        s.with(|d| {
+            let info = d.info();
+            d.write_params_guarded(&params, &|cur| s.backup(&info.serial, &info.firmware, cur))
+        })
+    })
+    .await
 }
 
 #[tauri::command]
@@ -273,7 +437,36 @@ pub async fn set_streaming(app: AppHandle, on: bool) -> ApiResult<()> {
 
 #[tauri::command]
 pub async fn start_calibration(app: AppHandle, coeffs: CalibCoefficients) -> ApiResult<()> {
-    blocking(app, move |s| s.with(|d| d.start_calibration(coeffs))).await
+    blocking(app, move |s| {
+        s.with(|d| {
+            let info = d.info();
+            d.start_calibration_guarded(coeffs, &|cur| s.backup(&info.serial, &info.firmware, cur))
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn snapshot_status(app: AppHandle) -> ApiResult<SnapshotStatus> {
+    blocking(app, |s| {
+        let (serial, connected_at, original_error) = s.session()?;
+        Ok(snapshot_status_for(
+            s.store(),
+            &serial,
+            connected_at,
+            original_error,
+        ))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn preview_restore(app: AppHandle, kind: SnapshotKind) -> ApiResult<RestorePreview> {
+    blocking(app, move |s| {
+        let (serial, connected_at, _) = s.session()?;
+        Ok(restore_preview(s.store(), &serial, kind, connected_at)?)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -284,7 +477,7 @@ pub async fn auto_gain(app: AppHandle) -> ApiResult<()> {
 #[tauri::command]
 pub async fn export_config(app: AppHandle, path: String, params: SensorParams) -> ApiResult<()> {
     blocking(app, move |s| {
-        let fw = s.lock().as_ref().map(|(_, d)| d.info().firmware);
+        let fw = s.lock().as_ref().map(|c| c.device.info().firmware);
         let json = config_file::to_json(&params, fw.as_deref());
         std::fs::write(&path, json).map_err(io_err)
     })
@@ -304,6 +497,7 @@ pub async fn import_config(app: AppHandle, path: String) -> ApiResult<SensorPara
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::time::Duration;
 
     fn sample() -> RawEngineering {
         let mut energy = [0u32; 32];
@@ -413,10 +607,99 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let s = AppState::default();
-        assert_eq!(s.install(1, d), Err(DeviceError::Disconnected));
+        let now = SystemTime::now();
+        assert_eq!(s.install(1, d, now), Err(DeviceError::Disconnected));
         assert!(s.lock().is_none());
         let live = open_sim(SimOptions::default()).unwrap();
-        assert_eq!(s.install(2, live), Ok(()));
+        assert_eq!(s.install(2, live, now), Ok(()));
         assert!(s.lock().is_some());
+    }
+
+    fn sensor(d: f32) -> SensorParams {
+        SensorParams {
+            max_distance_m: d,
+            disappear_delay_s: 5,
+            trigger_db: [40.0; 16],
+            micro_db: [30.0; 16],
+        }
+    }
+
+    #[test]
+    fn status_unknown_serial_hides_old_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = SnapshotStore::new(dir.path().to_path_buf());
+        st.save_backup("FFFFFFFF", "fw", &sensor(3.0)).unwrap();
+        st.save_backup("SN1", "fw", &sensor(3.0)).unwrap();
+        let later = SystemTime::now() + Duration::from_secs(5);
+        // Blank serial: a backup from before this connection is hidden.
+        let s = snapshot_status_for(Some(&st), "FFFFFFFF", later, None);
+        assert!(s.unknown_serial);
+        assert_eq!(s.latest_backup, None);
+        assert_eq!(s.original, None);
+        // Taken during the connection: shown.
+        let earlier = SystemTime::now() - Duration::from_secs(5);
+        let s = snapshot_status_for(Some(&st), "FFFFFFFF", earlier, None);
+        assert!(s.latest_backup.is_some());
+        // Known serial: no time filter.
+        let s = snapshot_status_for(Some(&st), "SN1", later, Some("boom".into()));
+        assert!(!s.unknown_serial);
+        assert!(s.latest_backup.is_some());
+        assert_eq!(s.original_error.as_deref(), Some("boom"));
+        let v = serde_json::to_value(&s).unwrap();
+        for k in ["original", "latestBackup", "unknownSerial", "originalError"] {
+            assert!(v.get(k).is_some(), "{k} missing in {v}");
+        }
+        assert_eq!(v["latestBackup"]["kind"], "backup");
+        // No store: nothing offered.
+        let s = snapshot_status_for(None, "SN1", later, None);
+        assert_eq!((s.original, s.latest_backup), (None, None));
+    }
+
+    #[test]
+    fn preview_reports_clamps() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = SnapshotStore::new(dir.path().to_path_buf());
+        let now = SystemTime::now();
+        assert_eq!(
+            restore_preview(Some(&st), "SN1", SnapshotKind::Original, now)
+                .err()
+                .map(|e| matches!(e, DeviceError::Io { .. })),
+            Some(true)
+        );
+        st.save_original_if_absent("SN1", "fw", &sensor(3.0))
+            .unwrap();
+        let path = dir.path().join("SN1").join("original.json");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        v["params"]["maxDistanceM"] = json!(12.0);
+        std::fs::write(&path, v.to_string()).unwrap();
+        let p = restore_preview(Some(&st), "SN1", SnapshotKind::Original, now).unwrap();
+        assert_eq!(p.meta.kind, SnapshotKind::Original);
+        assert_eq!(p.params.max_distance_m, 10.0);
+        assert_eq!(p.clamped.len(), 1);
+        assert_eq!(p.clamped[0].field, "maxDistanceM");
+        assert!(!p.unknown_serial);
+        let j = serde_json::to_value(&p).unwrap();
+        assert_eq!(j["meta"]["kind"], "original");
+        assert!(j["clamped"].is_array() && j.get("unknownSerial").is_some());
+        assert_eq!(
+            serde_json::from_value::<SnapshotKind>(json!("backup")).unwrap(),
+            SnapshotKind::Backup
+        );
+        // Corrupt file -> Io with the load error.
+        std::fs::write(&path, "not json").unwrap();
+        match restore_preview(Some(&st), "SN1", SnapshotKind::Original, now) {
+            Err(DeviceError::Io { message }) => {
+                assert!(message.contains("invalid snapshot"), "{message}")
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn storeless_backup_is_refused() {
+        let s = AppState::default();
+        let e = s.backup("SN1", "fw", &sensor(3.0)).unwrap_err();
+        assert!(e.contains("no app data directory"), "{e}");
     }
 }

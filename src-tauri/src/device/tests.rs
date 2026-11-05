@@ -462,3 +462,94 @@ fn guard_runs_before_the_dead_check() {
         Err(DeviceError::Disconnected)
     );
 }
+
+fn open_recording_with_sim() -> (Device, super::test_support::Frames, SimHandle) {
+    let t = super::test_support::RecordingTransport::new(SimOptions::default());
+    let frames = t.frames_handle();
+    let h = t.sim_handle();
+    let d = Device::open(Box::new(t), Box::new(|_| {})).expect("open");
+    (d, frames, h)
+}
+
+fn sent_word(frames: &super::test_support::Frames, word: u16) -> bool {
+    frames
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|f| f.len() >= 8 && u16::from_le_bytes([f[6], f[7]]) == word)
+}
+
+#[test]
+fn guarded_write_backs_up_current_values_first() {
+    let (d, frames, h) = open_recording_with_sim();
+    let a = h.params();
+    let b = modified(&h);
+    let seen: Mutex<Vec<SensorParams>> = Mutex::default();
+    d.write_params_guarded(&b, &|cur: &SensorParams| {
+        seen.lock().unwrap().push(cur.clone());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(*seen.lock().unwrap(), vec![a]);
+    assert_eq!(h.params(), b);
+    assert!(h.saved() && !h.in_config());
+    assert!(sent_word(&frames, CMD_WRITE_PARAMS));
+}
+
+#[test]
+fn backup_failure_blocks_write() {
+    let (d, frames, h) = open_recording_with_sim();
+    let a = h.params();
+    let b = modified(&h);
+    let r = d.write_params_guarded(&b, &|_: &SensorParams| Err("disk full".to_string()));
+    assert_eq!(
+        r,
+        Err(DeviceError::BackupFailed {
+            message: "disk full".into()
+        })
+    );
+    assert!(!sent_word(&frames, 0x0007), "no write frame may be sent");
+    assert!(!sent_word(&frames, CMD_SAVE));
+    assert!(!h.in_config());
+    assert_eq!(h.params(), a);
+    assert_eq!(
+        serde_json::to_value(DeviceError::BackupFailed {
+            message: "x".into()
+        })
+        .unwrap(),
+        serde_json::json!({"kind": "backupFailed", "message": "x"})
+    );
+}
+
+#[test]
+fn backup_failure_blocks_calibration() {
+    let (d, frames, h) = open_recording_with_sim();
+    let r = d.start_calibration_guarded(coeffs(), &|_: &SensorParams| Err("disk full".to_string()));
+    assert_eq!(
+        r,
+        Err(DeviceError::BackupFailed {
+            message: "disk full".into()
+        })
+    );
+    assert!(
+        !sent_word(&frames, 0x0009),
+        "no calibration frame may be sent"
+    );
+    assert!(!h.in_config());
+    // Not left busy: a normal read still works.
+    assert_eq!(d.read_params(), Ok(h.params()));
+}
+
+#[test]
+fn guarded_calibration_backs_up_then_runs() {
+    let (d, frames, h) = open_recording_with_sim();
+    let a = h.params();
+    let seen: Mutex<Vec<SensorParams>> = Mutex::default();
+    d.start_calibration_guarded(coeffs(), &|cur: &SensorParams| {
+        seen.lock().unwrap().push(cur.clone());
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(*seen.lock().unwrap(), vec![a]);
+    assert!(sent_word(&frames, 0x0009));
+}

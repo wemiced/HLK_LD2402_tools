@@ -13,6 +13,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(api::AppState::default())
+        .setup(|app| {
+            // Without an app data dir no backup can be made, so every write
+            // and calibration is refused (BackupFailed) rather than unguarded.
+            if let Ok(dir) = app.path().app_data_dir() {
+                app.state::<api::AppState>()
+                    .set_store(snapshots::SnapshotStore::new(dir.join("snapshots")));
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             api::list_ports,
             api::connect,
@@ -23,7 +32,9 @@ pub fn run() {
             api::start_calibration,
             api::auto_gain,
             api::export_config,
-            api::import_config
+            api::import_config,
+            api::snapshot_status,
+            api::preview_restore
         ])
         .on_window_event(|window, event| {
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {

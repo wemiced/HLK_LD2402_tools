@@ -84,6 +84,7 @@
   "errors.busy": "The sensor is busy with another operation.",
   "errors.forbidden": "Blocked a command outside the LD2402 protocol ({word}). Nothing was sent.",
   "errors.io": "Communication error: {message}",
+  "errors.backupFailed": "Could not save a backup of the current settings ({message}). Nothing was written to the sensor.",
   "errors.unknown": "Unexpected error.",
   "errors.config.notAConfig": "This file is not an LD2402 configuration.",
   "errors.config.unsupportedVersion": "Unsupported configuration version {version}.",

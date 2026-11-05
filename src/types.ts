@@ -58,12 +58,46 @@ export type DeviceError =
   | { kind: "disconnected" }
   | { kind: "busy" }
   | { kind: "forbidden"; word: number }
-  | { kind: "io"; message: string };
+  | { kind: "io"; message: string }
+  | { kind: "backupFailed"; message: string };
 
 export type ConfigError =
   | { kind: "config"; reason: "notAConfig" }
   | { kind: "config"; reason: "unsupportedVersion"; version: number }
   | { kind: "config"; reason: "outOfRange"; field: string };
+
+export type SnapshotKind = "original" | "backup";
+
+export interface SnapshotMeta {
+  kind: SnapshotKind;
+  /** RFC3339 UTC. */
+  savedAt: string;
+  /** File name only. */
+  file: string;
+}
+
+export interface SnapshotStatus {
+  original: SnapshotMeta | null;
+  /** For a blank serial, only a backup taken during this connection. */
+  latestBackup: SnapshotMeta | null;
+  unknownSerial: boolean;
+  /** Why the first-connection snapshot could not be saved, if it failed. */
+  originalError: string | null;
+}
+
+/** A value that was out of range in the snapshot and was clamped. */
+export interface ClampedField {
+  field: string;
+  from: number;
+  to: number;
+}
+
+export interface RestorePreview {
+  meta: SnapshotMeta;
+  params: SensorParams;
+  clamped: ClampedField[];
+  unknownSerial: boolean;
+}
 
 export type ApiErrorData = DeviceError | ConfigError;
 

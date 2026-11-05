@@ -8,7 +8,10 @@ import type {
   Disconnected,
   FrameDto,
   PortInfo,
+  RestorePreview,
   SensorParams,
+  SnapshotKind,
+  SnapshotStatus,
 } from "./types";
 
 export class ApiError extends Error {
@@ -45,6 +48,9 @@ export const autoGain = () => call<void>("auto_gain");
 export const exportConfig = (path: string, params: SensorParams) =>
   call<void>("export_config", { path, params });
 export const importConfig = (path: string) => call<SensorParams>("import_config", { path });
+export const snapshotStatus = () => call<SnapshotStatus>("snapshot_status");
+export const previewRestore = (kind: SnapshotKind) =>
+  call<RestorePreview>("preview_restore", { kind });
 
 const on =
   <T>(name: string) =>

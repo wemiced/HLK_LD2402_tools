@@ -3,7 +3,7 @@
 
 use crate::config_file::{ClampedField, from_json_lenient, rfc3339_utc, snapshot_json};
 use crate::protocol::commands::SensorParams;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,7 +12,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MAX_BACKUPS: usize = 10;
 const ORIGINAL: &str = "original.json";
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum SnapshotKind {
     Original,

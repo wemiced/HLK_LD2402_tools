@@ -84,6 +84,7 @@
   "errors.busy": "Le capteur est occupé par une autre opération.",
   "errors.forbidden": "Commande hors du protocole LD2402 bloquée ({word}). Rien n'a été envoyé.",
   "errors.io": "Erreur de communication : {message}",
+  "errors.backupFailed": "Impossible d'enregistrer une sauvegarde des réglages actuels ({message}). Rien n'a été écrit dans le capteur.",
   "errors.unknown": "Erreur inattendue.",
   "errors.config.notAConfig": "Ce fichier n'est pas une configuration LD2402.",
   "errors.config.unsupportedVersion": "Version de configuration {version} non prise en charge.",
