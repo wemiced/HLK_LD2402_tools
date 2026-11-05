@@ -40,15 +40,17 @@ export function installPowerBanner(): void {
     const s = app.get();
     const on = s.connection === "connected" && s.info?.power === "interference";
     const shown = !!document.querySelector('[data-banner="power"]');
+    if (s.connection !== "connected") dismissed = false;
     if (!on) return hideBanner("power");
-    if (shown || dismissedFor === s.info) return;
+    if (shown || dismissed) return;
     showBanner("power", "warning", `⚠️ <b>${esc(t("banner.power.title"))}</b> — <span>${esc(t("banner.power.body"))}</span><div class="grow"></div><button class="btn sm ghost">${esc(t("banner.dismiss"))}</button>`);
     document.querySelector('[data-banner="power"] button')?.addEventListener("click", () => {
-      dismissedFor = s.info;
+      dismissed = true;
       hideBanner("power");
     });
   };
-  let dismissedFor: unknown = null;
+  // dismissal lasts for the connection; reset when it drops
+  let dismissed = false;
   app.subscribe(sync);
   sync();
 }

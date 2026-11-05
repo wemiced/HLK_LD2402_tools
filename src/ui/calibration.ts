@@ -7,6 +7,8 @@ import { toast } from "./notify";
 import { confirmDiscardIfDirty } from "./paramsPanel";
 
 const GATES = 16;
+const CALIB_IDLE_MS = 15_000;
+const AUTOGAIN_TIMEOUT_MS = 30_000;
 // Coefficient range/default follow the manual ("higher = more sensitive").
 // TODO(hardware): verify the range and default against a real sensor.
 const COEF_MIN = 1, COEF_MAX = 20, COEF_STEP = 0.1, COEF_DEFAULT = 3;
@@ -61,6 +63,13 @@ export function mountCalibration(el: HTMLElement): void {
   let wasStreaming = false;
   // bumped on every disconnect / new run so stale async work can bail out
   let epoch = 0;
+  let starting = false;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const stopWatchdog = () => { if (watchdog) clearTimeout(watchdog); watchdog = null; };
+  const kick = () => {
+    stopWatchdog();
+    watchdog = setTimeout(() => void abort(t("calib.timeout")), CALIB_IDLE_MS);
+  };
   const live = (e: number) => e === epoch && app.get().connection === "connected";
 
   function render(): void {
@@ -97,6 +106,8 @@ export function mountCalibration(el: HTMLElement): void {
 
   function goto(next: Step): void {
     step = next;
+    if (next !== "measure") stopWatchdog();
+    if (app.get().calibrating !== (next === "measure")) app.set({ calibrating: next === "measure" });
     render();
   }
 
@@ -113,16 +124,31 @@ export function mountCalibration(el: HTMLElement): void {
     }
   }
 
+  /** Calibration failed or went silent: back to Prepare with an error toast. */
+  async function abort(message: string): Promise<void> {
+    if (step !== "measure") return;
+    const ep = epoch;
+    toast("error", message);
+    goto("prepare");
+    await restoreStreaming(ep);
+  }
+
   async function run(): Promise<void> {
     const s = app.get();
-    if (s.connection !== "connected" || step !== "prepare") return;
-    if (isDirty(s.sensor, s.draft) && !(await confirmDiscardIfDirty())) return;
-    if (app.get().connection !== "connected") return;
+    if (starting || s.connection !== "connected" || step !== "prepare") return;
+    starting = true;
+    try {
+      if (isDirty(s.sensor, s.draft) && !(await confirmDiscardIfDirty())) return;
+    } finally {
+      starting = false;
+    }
+    if (app.get().connection !== "connected" || step !== "prepare") return;
     const ep = ++epoch;
     progress = 0;
     gates = [];
     wasStreaming = app.get().streaming;
     goto("measure");
+    kick();
     try {
       // the device answers Busy to other commands during calibration
       if (wasStreaming) {
@@ -146,12 +172,14 @@ export function mountCalibration(el: HTMLElement): void {
 
   void onCalibProgress((p) => {
     if (step !== "measure") return;
+    kick();
     progress = Math.max(0, Math.min(100, Math.round(p)));
     render();
   });
   void onCalibDone(async (d) => {
     if (step !== "measure") return;
     const ep = epoch;
+    stopWatchdog();
     gates = d.gates;
     progress = 100;
     goto("result");
@@ -165,14 +193,12 @@ export function mountCalibration(el: HTMLElement): void {
   });
   void onCalibFailed(async (f) => {
     if (step !== "measure") return;
-    const ep = epoch;
-    toast("error", errorMessage({ ...f.error }));
-    goto("prepare");
-    await restoreStreaming(ep);
+    await abort(errorMessage({ ...f.error }));
   });
 
   onDisconnect(() => {
     epoch++;
+    stopWatchdog();
     wasStreaming = false;
     progress = 0;
     gates = [];
@@ -199,6 +225,8 @@ export function mountCalibrationCard(el: HTMLElement): void {
   const q = <T extends HTMLElement>(role: string) => el.querySelector<T>(`[data-role="${role}"]`)!;
   const btn = q<HTMLButtonElement>("autogain");
   let busy = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const clear = () => { if (timer) clearTimeout(timer); timer = null; };
 
   function render(): void {
     const s = app.get();
@@ -206,6 +234,7 @@ export function mountCalibrationCard(el: HTMLElement): void {
     const supported = !!s.info?.capabilities.autoGain;
     btn.disabled = busy || !connected || !supported;
     btn.classList.toggle("busy", busy);
+    btn.setAttribute("aria-busy", String(busy));
     btn.title = connected && !supported ? t("caps.requires", { version: "3.3.5" }) : "";
     btn.querySelector<HTMLElement>(".spinner")!.hidden = !busy;
     q("autogain-label").textContent = t(busy ? "calib.autoGaining" : "calib.autoGain");
@@ -216,9 +245,17 @@ export function mountCalibrationCard(el: HTMLElement): void {
     if (btn.disabled) return;
     busy = true;
     render();
+    clear();
+    timer = setTimeout(() => {
+      if (!busy) return;
+      busy = false;
+      render();
+      toast("error", t("autogain.timeout"));
+    }, AUTOGAIN_TIMEOUT_MS);
     try {
       await autoGain();
     } catch (e) {
+      clear();
       busy = false;
       render();
       toast("error", errorMessageOf(e));
@@ -226,11 +263,12 @@ export function mountCalibrationCard(el: HTMLElement): void {
   });
   void onAutoGainDone(() => {
     if (!busy) return;
+    clear();
     busy = false;
     render();
     toast("success", t("calib.autoGainDone"));
   });
-  onDisconnect(() => { busy = false; render(); });
+  onDisconnect(() => { clear(); busy = false; render(); });
   app.subscribe(render);
   onLocaleChange(() => { renderI18n(el); render(); });
   render();

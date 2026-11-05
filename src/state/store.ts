@@ -28,6 +28,8 @@ export interface AppState {
   sensor: SensorParams | null;
   draft: SensorParams | null;
   streaming: boolean;
+  /** True while an automatic calibration is measuring (other commands would be Busy). */
+  calibrating: boolean;
   lastFrame: FrameDto | null;
   series: "trigger" | "micro";
 }
@@ -40,6 +42,7 @@ export const app = createStore<AppState>({
   sensor: null,
   draft: null,
   streaming: false,
+  calibrating: false,
   lastFrame: null,
   series: "trigger",
 });

@@ -123,5 +123,7 @@
   "calib.autoGaining": "Adjusting…",
   "calib.autoGainDone": "Gain adjusted.",
   "caps.requires": "Requires firmware {version} or later",
-  "calib.gates": "Gates (70 cm each)"
+  "calib.gates": "Gates (70 cm each)",
+  "calib.timeout": "The calibration did not finish: the sensor stopped responding.",
+  "autogain.timeout": "The gain adjustment did not finish in time."
 }

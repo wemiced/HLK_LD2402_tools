@@ -118,3 +118,14 @@ it("Pause resolving after disconnect leaves streaming false", async () => {
   await wait();
   expect(app.get().streaming).toBe(false);
 });
+
+it("disables pause/resume while a calibration is measuring", async () => {
+  app.set({ connection: "connected" });
+  await wait();
+  const pause = el.querySelector<HTMLButtonElement>('[data-role="pause"]')!;
+  expect(pause.disabled).toBe(false);
+  app.set({ calibrating: true });
+  await wait();
+  expect(pause.disabled).toBe(true);
+  app.set({ calibrating: false });
+});

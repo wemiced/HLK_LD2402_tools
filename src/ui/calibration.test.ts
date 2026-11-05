@@ -163,3 +163,50 @@ it("auto gain error toasts and resets", async () => {
   expect(h.toast).toHaveBeenCalledWith("error", "The sensor is busy with another operation.");
   expect(b.disabled).toBe(false);
 });
+
+it("calibration watchdog: silence for 15 s aborts with a toast and restores streaming", async () => {
+  app.set({ streaming: true });
+  vi.useFakeTimers();
+  try {
+    q("start").click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.get().calibrating).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    h.cb.progress(10 as never); // progress re-arms the watchdog
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(q("step-measure").hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(h.toast).toHaveBeenCalledWith("error", "The calibration did not finish: the sensor stopped responding.");
+    expect(q("step-prepare").hidden).toBe(false);
+    expect(app.get().calibrating).toBe(false);
+    expect(h.setStreaming).toHaveBeenLastCalledWith(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("auto gain watchdog: no AutoGainDone within 30 s resets with an error toast", async () => {
+  vi.useFakeTimers();
+  try {
+    const b = q<HTMLButtonElement>("autogain");
+    b.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(b.getAttribute("aria-busy")).toBe("true");
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(h.toast).toHaveBeenCalledWith("error", "The gain adjustment did not finish in time.");
+    expect(b.disabled).toBe(false);
+    expect(b.getAttribute("aria-busy")).toBe("false");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("a second Start click while the discard dialog is open is ignored", async () => {
+  app.set({ sensor: params, draft: { ...params, maxDistanceM: 6 } });
+  h.confirm.mockImplementation(() => new Promise((r) => setTimeout(() => r(true), 40)));
+  q("start").click();
+  q("start").click();
+  await wait(100);
+  expect(h.confirm).toHaveBeenCalledTimes(1);
+  expect(h.startCalibration).toHaveBeenCalledTimes(1);
+});

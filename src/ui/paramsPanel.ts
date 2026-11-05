@@ -24,7 +24,7 @@ const TEMPLATE = `
   <div class="field">
     <div class="top"><label data-i18n="params.thresholds"></label><span class="hint" data-i18n="params.gates"></span></div>
     <div class="seg"><button data-series="trigger" data-i18n="params.series.trigger"></button><button data-series="micro" data-i18n="params.series.micro"></button></div>
-    <div class="row"><span class="hint" data-i18n="params.dragHint"></span><button class="btn sm" data-role="table" data-i18n="params.openTable"></button></div>
+    <div class="row"><span class="hint" data-i18n="params.dragHint"></span><button class="btn sm" style="white-space:nowrap;flex:none" data-role="table" data-i18n="params.openTable"></button></div>
   </div>
   <div class="dirty" data-role="dirty">● <span data-i18n="params.dirty"></span><span class="tag" data-role="perm" data-i18n="params.permanentSave"></span><div class="grow"></div>
     <button class="btn ghost sm" data-role="undo" data-i18n="params.undo"></button>

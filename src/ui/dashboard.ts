@@ -116,7 +116,7 @@ export function mountDashboard(el: HTMLElement): void {
     const showPreview = connected && !!f && !!p && isDirty(s.sensor, s.draft);
     preview.hidden = !showPreview;
     preview.textContent = showPreview ? t("status.preview", { state: t(STATE_KEY[previewPresence(f!, p!)]) }) : "";
-    pause.disabled = !connected;
+    pause.disabled = !connected || s.calibrating;
     pause.textContent = (s.streaming ? "⏸ " : "▶ ") + t(s.streaming ? "status.pause" : "status.resume");
     energy.render(connected ? f : null, p, s.series);
     line.render();

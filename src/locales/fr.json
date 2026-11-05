@@ -123,5 +123,7 @@
   "calib.autoGaining": "Ajustement…",
   "calib.autoGainDone": "Gain ajusté.",
   "caps.requires": "Nécessite le firmware {version} ou plus récent",
-  "calib.gates": "Portes (70 cm chacune)"
+  "calib.gates": "Portes (70 cm chacune)",
+  "calib.timeout": "La calibration ne s'est pas terminée : le capteur ne répond plus.",
+  "autogain.timeout": "L'ajustement du gain ne s'est pas terminé à temps."
 }
