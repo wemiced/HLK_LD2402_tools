@@ -30,6 +30,10 @@ export interface AppState {
   streaming: boolean;
   /** True while an automatic calibration is measuring (other commands would be Busy). */
   calibrating: boolean;
+  /** True from an auto-gain request until its completion report (or timeout). */
+  autoGaining: boolean;
+  /** True while the parameter panel runs a read/write/import sequence. */
+  paramsBusy: boolean;
   lastFrame: FrameDto | null;
   series: "trigger" | "micro";
 }
@@ -43,6 +47,8 @@ export const app = createStore<AppState>({
   draft: null,
   streaming: false,
   calibrating: false,
+  autoGaining: false,
+  paramsBusy: false,
   lastFrame: null,
   series: "trigger",
 });

@@ -78,7 +78,6 @@ export function mountParamsPanel(el: HTMLElement): void {
   document.body.appendChild(drawer);
   const table = mountGateTable(drawer);
 
-  let busy = false;
   let epoch = 0;
   const live = (e: number) => e === epoch && app.get().connection === "connected";
 
@@ -100,11 +99,13 @@ export function mountParamsPanel(el: HTMLElement): void {
     perm.hidden = !s.info?.capabilities.permanentSave;
     const edit = !!p && connected;
     dist.disabled = delay.disabled = delayNum.disabled = !edit;
-    writeBtn.disabled = busy || !dirty || !connected;
-    undoBtn.disabled = busy || !dirty;
-    reloadBtn.disabled = busy || !connected;
+    // the device answers Busy while a calibration or an auto-gain runs
+    const blocked = s.paramsBusy || s.calibrating || s.autoGaining;
+    writeBtn.disabled = blocked || !dirty || !connected;
+    undoBtn.disabled = s.paramsBusy || !dirty;
+    reloadBtn.disabled = blocked || !connected;
     exportBtn.disabled = !p;
-    importBtn.disabled = busy || !connected || !s.sensor;
+    importBtn.disabled = blocked || !connected || !s.sensor;
     segBtns.forEach((b) => b.classList.toggle("on", b.dataset.series === s.series));
   }
 
@@ -126,10 +127,10 @@ export function mountParamsPanel(el: HTMLElement): void {
   q("table").addEventListener("click", () => table.open());
 
   async function guarded(fn: () => Promise<void>): Promise<void> {
-    if (busy) return;
-    busy = true;
-    render();
-    try { await fn(); } finally { busy = false; render(); }
+    const s = app.get();
+    if (s.paramsBusy || s.calibrating || s.autoGaining) return;
+    app.set({ paramsBusy: true });
+    try { await fn(); } finally { app.set({ paramsBusy: false }); }
   }
 
   writeBtn.addEventListener("click", () => void guarded(async () => {
@@ -157,7 +158,7 @@ export function mountParamsPanel(el: HTMLElement): void {
   }));
 
   undoBtn.addEventListener("click", () => {
-    if (busy) return;
+    if (app.get().paramsBusy) return;
     app.set({ draft: app.get().sensor });
   });
 

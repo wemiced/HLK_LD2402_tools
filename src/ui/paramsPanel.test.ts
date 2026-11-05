@@ -71,6 +71,9 @@ beforeEach(async () => {
     sensor: params,
     draft: params,
     series: "trigger",
+    calibrating: false,
+    autoGaining: false,
+    paramsBusy: false,
   });
   document.body.innerHTML = '<div id="p"></div><aside id="d"></aside>';
   el = document.getElementById("p")!;
@@ -189,4 +192,22 @@ it("close_handler_confirm_closes_once_cancel_keeps", async () => {
   await h.closeCb!(e3);
   expect(h.ask).not.toHaveBeenCalled();
   expect(e3.preventDefault).not.toHaveBeenCalled();
+});
+
+it("Write/Re-read/Import are disabled while calibrating or auto-gaining; a write marks paramsBusy", async () => {
+  slide("dist", "6");
+  const btns = () => (["write", "reload", "import"] as const).map((r) => q<HTMLButtonElement>(r).disabled);
+  expect(btns()).toEqual([false, false, false]);
+  app.set({ calibrating: true });
+  expect(btns()).toEqual([true, true, true]);
+  app.set({ calibrating: false, autoGaining: true });
+  expect(btns()).toEqual([true, true, true]);
+  app.set({ autoGaining: false });
+  let resolve!: () => void;
+  h.writeParams.mockReturnValue(new Promise<void>((r) => (resolve = r)));
+  q<HTMLButtonElement>("write").click();
+  expect(app.get().paramsBusy).toBe(true);
+  resolve();
+  await wait();
+  expect(app.get().paramsBusy).toBe(false);
 });

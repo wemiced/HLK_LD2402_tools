@@ -364,3 +364,53 @@ fn transport_error_emits_disconnected() {
     assert!(got, "no Disconnected event within 1 s");
     assert_eq!(d.read_params(), Err(DeviceError::Disconnected));
 }
+
+fn wait_auto_gain_done(rx: &Receiver<DeviceEvent>) -> bool {
+    std::iter::from_fn(|| rx.recv_timeout(Duration::from_secs(1)).ok())
+        .any(|e| matches!(e, DeviceEvent::AutoGainDone))
+}
+
+#[test]
+fn busy_during_auto_gain() {
+    let (d, h, rx) = open(SimOptions {
+        hold_auto_gain_done: true,
+        ..Default::default()
+    });
+    let p = h.params();
+    d.auto_gain().unwrap();
+    assert!(!h.in_config());
+    assert_eq!(d.read_params(), Err(DeviceError::Busy));
+    assert_eq!(d.write_params(&p), Err(DeviceError::Busy));
+    assert_eq!(d.set_streaming(true), Err(DeviceError::Busy));
+    assert_eq!(d.start_calibration(coeffs()), Err(DeviceError::Busy));
+    assert_eq!(d.auto_gain(), Err(DeviceError::Busy));
+    h.finish_auto_gain();
+    assert!(wait_auto_gain_done(&rx), "no AutoGainDone event");
+    assert_eq!(d.read_params(), Ok(p));
+}
+
+#[test]
+fn auto_gain_busy_expires_without_done_event() {
+    let (mut d, h, _rx) = open(SimOptions {
+        hold_auto_gain_done: true,
+        ..Default::default()
+    });
+    d.auto_gain_limit = Duration::from_millis(300);
+    d.auto_gain().unwrap();
+    assert_eq!(d.read_params(), Err(DeviceError::Busy));
+    std::thread::sleep(Duration::from_millis(350));
+    assert_eq!(d.read_params(), Ok(h.params()));
+}
+
+#[test]
+fn failed_auto_gain_is_not_busy() {
+    let (d, h, _rx) = try_open_tampered(drop_word(CMD_AUTO_GAIN));
+    let d = d.unwrap_or_else(|e| panic!("open failed: {e}"));
+    assert_eq!(
+        d.auto_gain(),
+        Err(DeviceError::Timeout {
+            word: CMD_AUTO_GAIN
+        })
+    );
+    assert_eq!(d.read_params(), Ok(h.params()));
+}

@@ -54,7 +54,7 @@ beforeEach(async () => {
   for (const f of [h.startCalibration, h.autoGain, h.setStreaming, h.toast]) f.mockReset().mockResolvedValue(undefined);
   h.readParams.mockReset().mockResolvedValue(params);
   h.confirm.mockReset().mockResolvedValue(true);
-  app.set({ connection: "connected", info: info(true), sensor: null, draft: null, streaming: false });
+  app.set({ connection: "connected", info: info(true), sensor: null, draft: null, streaming: false, calibrating: false, autoGaining: false, paramsBusy: false });
   document.body.innerHTML = '<section id="c"></section>';
   el = document.getElementById("c")!;
   mountCalibration(el);
@@ -209,4 +209,29 @@ it("a second Start click while the discard dialog is open is ignored", async () 
   await wait(100);
   expect(h.confirm).toHaveBeenCalledTimes(1);
   expect(h.startCalibration).toHaveBeenCalledTimes(1);
+});
+
+it("auto gain, calibration and parameter I/O exclude each other", async () => {
+  const gain = q<HTMLButtonElement>("autogain");
+  const start = q<HTMLButtonElement>("start");
+  gain.click();
+  await wait();
+  expect(app.get().autoGaining).toBe(true);
+  expect(start.disabled).toBe(true);
+  start.click();
+  await wait();
+  expect(h.startCalibration).not.toHaveBeenCalled();
+  h.cb.gain(null as never);
+  expect(app.get().autoGaining).toBe(false);
+  expect(start.disabled).toBe(false);
+
+  app.set({ paramsBusy: true });
+  expect(start.disabled).toBe(true);
+  expect(gain.disabled).toBe(true);
+  app.set({ paramsBusy: false });
+
+  start.click();
+  await wait();
+  expect(app.get().calibrating).toBe(true);
+  expect(gain.disabled).toBe(true);
 });

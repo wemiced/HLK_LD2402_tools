@@ -20,6 +20,8 @@ pub struct SimOptions {
     pub start_in_engineering: bool,
     pub start_in_config: bool,
     pub fail_after_reads: Option<usize>,
+    /// Withholds the 0x00F0 auto-gain completion until `SimHandle::finish_auto_gain`.
+    pub hold_auto_gain_done: bool,
 }
 
 impl Default for SimOptions {
@@ -30,6 +32,7 @@ impl Default for SimOptions {
             start_in_engineering: false,
             start_in_config: false,
             fail_after_reads: None,
+            hold_auto_gain_done: false,
         }
     }
 }
@@ -139,7 +142,7 @@ impl State {
             self.handle_config(&f)
         };
         self.out.extend(reply);
-        if f.word == CMD_AUTO_GAIN && self.in_config {
+        if f.word == CMD_AUTO_GAIN && self.in_config && !self.opts.hold_auto_gain_done {
             self.out
                 .extend(encode_command(EVT_AUTO_GAIN_DONE, &[0x01, 0x00]));
         }
@@ -288,6 +291,12 @@ impl SimHandle {
     }
     pub fn saved(&self) -> bool {
         lock(&self.shared).saved
+    }
+    /// Emits the auto-gain completion withheld by `hold_auto_gain_done`.
+    pub fn finish_auto_gain(&self) {
+        lock(&self.shared)
+            .out
+            .extend(encode_command(EVT_AUTO_GAIN_DONE, &[0x01, 0x00]));
     }
 }
 

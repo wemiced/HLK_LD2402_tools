@@ -73,9 +73,10 @@ export function mountCalibration(el: HTMLElement): void {
   const live = (e: number) => e === epoch && app.get().connection === "connected";
 
   function render(): void {
-    const connected = app.get().connection === "connected";
+    const s = app.get();
+    const connected = s.connection === "connected";
     q("notice").hidden = connected;
-    start.disabled = !connected;
+    start.disabled = !connected || s.autoGaining || s.paramsBusy;
     for (const c of COEFS) {
       q(`val-${c.id}`).textContent = formatNumber(Number(coef[c.id].value), 1);
       coef[c.id].disabled = step !== "prepare";
@@ -135,7 +136,7 @@ export function mountCalibration(el: HTMLElement): void {
 
   async function run(): Promise<void> {
     const s = app.get();
-    if (starting || s.connection !== "connected" || step !== "prepare") return;
+    if (starting || s.connection !== "connected" || step !== "prepare" || s.autoGaining || s.paramsBusy) return;
     starting = true;
     try {
       if (isDirty(s.sensor, s.draft) && !(await confirmDiscardIfDirty())) return;
@@ -224,7 +225,7 @@ export function mountCalibrationCard(el: HTMLElement): void {
   renderI18n(el);
   const q = <T extends HTMLElement>(role: string) => el.querySelector<T>(`[data-role="${role}"]`)!;
   const btn = q<HTMLButtonElement>("autogain");
-  let busy = false;
+  const setBusy = (on: boolean) => { if (app.get().autoGaining !== on) app.set({ autoGaining: on }); };
   let timer: ReturnType<typeof setTimeout> | null = null;
   const clear = () => { if (timer) clearTimeout(timer); timer = null; };
 
@@ -232,7 +233,8 @@ export function mountCalibrationCard(el: HTMLElement): void {
     const s = app.get();
     const connected = s.connection === "connected";
     const supported = !!s.info?.capabilities.autoGain;
-    btn.disabled = busy || !connected || !supported;
+    const busy = s.autoGaining;
+    btn.disabled = busy || s.calibrating || s.paramsBusy || !connected || !supported;
     btn.classList.toggle("busy", busy);
     btn.setAttribute("aria-busy", String(busy));
     btn.title = connected && !supported ? t("caps.requires", { version: "3.3.5" }) : "";
@@ -243,32 +245,28 @@ export function mountCalibrationCard(el: HTMLElement): void {
   q("launch").addEventListener("click", () => app.set({ view: "calibration" }));
   btn.addEventListener("click", async () => {
     if (btn.disabled) return;
-    busy = true;
-    render();
+    setBusy(true);
     clear();
     timer = setTimeout(() => {
-      if (!busy) return;
-      busy = false;
-      render();
+      if (!app.get().autoGaining) return;
+      setBusy(false);
       toast("error", t("autogain.timeout"));
     }, AUTOGAIN_TIMEOUT_MS);
     try {
       await autoGain();
     } catch (e) {
       clear();
-      busy = false;
-      render();
+      setBusy(false);
       toast("error", errorMessageOf(e));
     }
   });
   void onAutoGainDone(() => {
-    if (!busy) return;
+    if (!app.get().autoGaining) return;
     clear();
-    busy = false;
-    render();
+    setBusy(false);
     toast("success", t("calib.autoGainDone"));
   });
-  onDisconnect(() => { clear(); busy = false; render(); });
+  onDisconnect(() => { clear(); setBusy(false); });
   app.subscribe(render);
   onLocaleChange(() => { renderI18n(el); render(); });
   render();

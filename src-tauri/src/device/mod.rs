@@ -18,6 +18,8 @@ const ACK_BIT: u16 = 0x0100;
 const ACK_TIMEOUT: Duration = Duration::from_millis(500);
 const ACK_ATTEMPTS: u32 = 2;
 const CLEANUP_TIMEOUT: Duration = Duration::from_millis(300);
+/// Longest an auto-gain run keeps the device Busy without its 0x00F0 report.
+const AUTO_GAIN_LIMIT: Duration = Duration::from_secs(30);
 const CALIB_POLL: Duration = Duration::from_millis(500);
 /// Pause after a retried or timed-out request: late ACKs of its word are
 /// discarded and no new request is started, so none can be mistaken.
@@ -376,6 +378,9 @@ pub struct Device {
     calibrating: Arc<AtomicBool>,
     calib: Mutex<Option<CalibHelper>>,
     streaming: AtomicBool,
+    /// Deadline of the auto-gain run in progress; cleared by the 0x00F0 report.
+    auto_gain_until: Arc<Mutex<Option<Instant>>>,
+    auto_gain_limit: Duration,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -390,6 +395,15 @@ impl Device {
         let (tx, rx) = mpsc::channel();
         let dead = Arc::new(AtomicBool::new(false));
         let worker_dead = Arc::clone(&dead);
+        let auto_gain_until: Arc<Mutex<Option<Instant>>> = Arc::default();
+        let ag = Arc::clone(&auto_gain_until);
+        // Cleared before forwarding, so a call made on AutoGainDone is not Busy.
+        let on_event: Box<dyn Fn(DeviceEvent) + Send> = Box::new(move |ev| {
+            if matches!(ev, DeviceEvent::AutoGainDone) {
+                *lock(&ag) = None;
+            }
+            on_event(ev)
+        });
         let worker = thread::Builder::new()
             .name("ld2402-worker".into())
             .spawn(move || worker_loop(t, rx, on_event, worker_dead))
@@ -417,6 +431,8 @@ impl Device {
             calibrating: Arc::new(AtomicBool::new(false)),
             calib: Mutex::new(None),
             streaming: AtomicBool::new(false),
+            auto_gain_until,
+            auto_gain_limit: AUTO_GAIN_LIMIT,
         })
     }
 
@@ -424,12 +440,29 @@ impl Device {
         self.info.clone()
     }
 
+    /// True while an auto-gain run is in progress (until 0x00F0 or the limit).
+    fn auto_gaining(&self) -> bool {
+        let mut until = lock(&self.auto_gain_until);
+        match *until {
+            Some(t) if Instant::now() < t => true,
+            Some(_) => {
+                *until = None;
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn busy(&self) -> bool {
+        self.calibrating.load(Ordering::SeqCst) || self.auto_gaining()
+    }
+
     fn begin(&self) -> Result<MutexGuard<'_, ()>, DeviceError> {
-        if self.calibrating.load(Ordering::SeqCst) {
+        if self.busy() {
             return Err(DeviceError::Busy);
         }
         let g = lock(&self.op);
-        if self.calibrating.load(Ordering::SeqCst) {
+        if self.busy() {
             return Err(DeviceError::Busy);
         }
         Ok(g)
@@ -526,7 +559,18 @@ impl Device {
                 required: "3.3.5".into(),
             });
         }
-        self.in_config(false, |_| self.link.once(CMD_AUTO_GAIN, &[]).map(drop))
+        // Armed before sending: the 0x00F0 report may follow the ACK at once.
+        *lock(&self.auto_gain_until) = Some(Instant::now() + self.auto_gain_limit);
+        let mut acked = false;
+        let r = self.in_config(false, |_| {
+            let r = self.link.once(CMD_AUTO_GAIN, &[]);
+            acked = r.is_ok();
+            r.map(drop)
+        });
+        if !acked {
+            *lock(&self.auto_gain_until) = None;
+        }
+        r
     }
 
     pub fn close(self) {

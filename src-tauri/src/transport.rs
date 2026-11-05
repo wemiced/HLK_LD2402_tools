@@ -91,7 +91,10 @@ mod tests {
                 path: "/nonexistent/ttyUSB9".into()
             }
         );
-        let v = serde_json::to_value(DeviceError::InUse { path: "/dev/x".into() }).unwrap();
+        let v = serde_json::to_value(DeviceError::InUse {
+            path: "/dev/x".into(),
+        })
+        .unwrap();
         assert_eq!(v, serde_json::json!({"kind": "inUse", "path": "/dev/x"}));
     }
 }
