@@ -30,10 +30,10 @@ fn wait_ack(
     while Instant::now() < deadline {
         let n = t.read(&mut buf).ok()?;
         for msg in dec.push(&buf[..n]) {
-            if let Inbound::Cmd(f) = msg {
-                if f.word == word | ACK_BIT {
-                    return Some(f);
-                }
+            if let Inbound::Cmd(f) = msg
+                && f.word == word | ACK_BIT
+            {
+                return Some(f);
             }
         }
     }
