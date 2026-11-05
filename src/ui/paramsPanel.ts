@@ -1,0 +1,197 @@
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { exportConfig, importConfig, readParams, writeParams } from "../api";
+import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
+import { clampParams, isDirty } from "../state/draft";
+import { app, onConnected, onDisconnect } from "../state/store";
+import { errorMessageOf } from "./errors";
+import { mountGateTable } from "./gateTable";
+import { toast } from "./notify";
+
+const TEMPLATE = `
+<div class="card">
+  <div class="row"><h3 data-i18n="params.title"></h3><div class="grow"></div>
+    <button class="btn ghost sm" data-role="reload">↻ <span data-i18n="params.reread"></span></button></div>
+  <div class="field">
+    <div class="top"><label for="p-dist" data-i18n="params.maxDistance"></label><span class="val" data-role="distVal"></span></div>
+    <input type="range" id="p-dist" min="0.7" max="10" step="0.1" data-role="dist">
+  </div>
+  <div class="field">
+    <div class="top"><label for="p-delay" data-i18n="params.disappearDelay"></label>
+      <span class="val"><input class="num" inputmode="numeric" data-role="delayNum"> <span data-i18n="units.s"></span></span></div>
+    <input type="range" id="p-delay" min="0" max="600" step="1" data-role="delay">
+  </div>
+  <div class="field">
+    <div class="top"><label data-i18n="params.thresholds"></label><span class="hint" data-i18n="params.gates"></span></div>
+    <div class="seg"><button data-series="trigger" data-i18n="params.series.trigger"></button><button data-series="micro" data-i18n="params.series.micro"></button></div>
+    <div class="row"><span class="hint" data-i18n="params.dragHint"></span><button class="btn sm" data-role="table" data-i18n="params.openTable"></button></div>
+  </div>
+  <div class="dirty" data-role="dirty">● <span data-i18n="params.dirty"></span><span class="tag" data-role="perm" data-i18n="params.permanentSave"></span><div class="grow"></div>
+    <button class="btn ghost sm" data-role="undo" data-i18n="params.undo"></button>
+    <button class="btn primary sm" data-role="write" data-i18n="params.write"></button></div>
+  <div class="actions">
+    <button class="btn" data-role="export" data-i18n="params.export"></button>
+    <button class="btn" data-role="import" data-i18n="params.import"></button>
+  </div>
+</div>`;
+
+const dirtyNow = () => isDirty(app.get().sensor, app.get().draft);
+
+/** True when it is safe to proceed (clean, or the user agreed to discard). */
+export async function confirmDiscardIfDirty(): Promise<boolean> {
+  if (!dirtyNow()) return true;
+  try {
+    return await ask(t("params.confirmDiscard"), { title: t("params.discardTitle"), kind: "warning" });
+  } catch {
+    return false;
+  }
+}
+
+/** Intercept window close while there are unwritten changes. */
+export async function installCloseGuard(): Promise<void> {
+  try {
+    const win = getCurrentWindow();
+    await win.onCloseRequested(async (ev) => {
+      if (!dirtyNow()) return;
+      ev.preventDefault();
+      if (await confirmDiscardIfDirty()) await win.destroy();
+    });
+  } catch {
+    /* not running inside Tauri */
+  }
+}
+
+export function mountParamsPanel(el: HTMLElement): void {
+  el.innerHTML = TEMPLATE;
+  const q = <T extends HTMLElement>(role: string) => el.querySelector<T>(`[data-role="${role}"]`)!;
+  const dist = q<HTMLInputElement>("dist"), delay = q<HTMLInputElement>("delay"), delayNum = q<HTMLInputElement>("delayNum");
+  const distVal = q("distVal"), dirtyEl = q("dirty"), perm = q("perm");
+  const writeBtn = q<HTMLButtonElement>("write"), undoBtn = q<HTMLButtonElement>("undo"), reloadBtn = q<HTMLButtonElement>("reload");
+  const exportBtn = q<HTMLButtonElement>("export"), importBtn = q<HTMLButtonElement>("import");
+  const segBtns = Array.from(el.querySelectorAll<HTMLButtonElement>(".seg button"));
+
+  const drawer = document.createElement("aside");
+  document.body.appendChild(drawer);
+  const table = mountGateTable(drawer);
+
+  let busy = false;
+  let epoch = 0;
+  const live = (e: number) => e === epoch && app.get().connection === "connected";
+
+  function render(): void {
+    const s = app.get();
+    const p = s.draft ?? s.sensor;
+    const connected = s.connection === "connected";
+    if (p) {
+      dist.value = String(p.maxDistanceM);
+      distVal.textContent = `${formatNumber(p.maxDistanceM, 1)} ${t("units.m")}`;
+      delay.value = String(Math.min(600, p.disappearDelayS));
+      if (document.activeElement !== delayNum) delayNum.value = String(p.disappearDelayS);
+    } else {
+      distVal.textContent = "—";
+      if (document.activeElement !== delayNum) delayNum.value = "";
+    }
+    const dirty = dirtyNow();
+    dirtyEl.classList.toggle("show", dirty);
+    perm.hidden = !s.info?.capabilities.permanentSave;
+    const edit = !!p && connected;
+    dist.disabled = delay.disabled = delayNum.disabled = !edit;
+    writeBtn.disabled = busy || !dirty || !connected;
+    undoBtn.disabled = busy || !dirty;
+    reloadBtn.disabled = busy || !connected;
+    exportBtn.disabled = !p;
+    importBtn.disabled = busy;
+    segBtns.forEach((b) => b.classList.toggle("on", b.dataset.series === s.series));
+  }
+
+  function edit(patch: Partial<{ maxDistanceM: number; disappearDelayS: number }>): void {
+    const s = app.get();
+    const base = s.draft ?? s.sensor;
+    if (!base) return;
+    app.set({ draft: clampParams({ ...base, ...patch }) });
+  }
+  dist.addEventListener("input", () => edit({ maxDistanceM: Number(dist.value) }));
+  delay.addEventListener("input", () => edit({ disappearDelayS: Number(delay.value) }));
+  delayNum.addEventListener("input", () => {
+    const v = Number(delayNum.value.trim().replace(",", "."));
+    if (delayNum.value.trim() === "" || !Number.isFinite(v)) return;
+    edit({ disappearDelayS: v });
+  });
+  delayNum.addEventListener("blur", render);
+  segBtns.forEach((b) => b.addEventListener("click", () => app.set({ series: b.dataset.series as "trigger" | "micro" })));
+  q("table").addEventListener("click", () => table.open());
+
+  async function guarded(fn: () => Promise<void>): Promise<void> {
+    if (busy) return;
+    busy = true;
+    render();
+    try { await fn(); } finally { busy = false; render(); }
+  }
+
+  writeBtn.addEventListener("click", () => void guarded(async () => {
+    const draft = app.get().draft;
+    if (!draft) return;
+    const ep = epoch;
+    try {
+      await writeParams(draft);
+      const fresh = await readParams();
+      if (!live(ep)) return;
+      app.set({ sensor: fresh, draft: fresh });
+      toast("success", t("params.written"));
+    } catch (e) {
+      if (live(ep)) toast("error", errorMessageOf(e));
+    }
+  }));
+
+  undoBtn.addEventListener("click", () => {
+    if (busy) return;
+    app.set({ draft: app.get().sensor });
+  });
+
+  reloadBtn.addEventListener("click", () => void guarded(async () => {
+    if (dirtyNow()) {
+      const ok = await ask(t("params.confirmReload"), { title: t("params.discardTitle"), kind: "warning" }).catch(() => false);
+      if (!ok) return;
+    }
+    const ep = epoch;
+    try {
+      const fresh = await readParams();
+      if (live(ep)) app.set({ sensor: fresh, draft: fresh });
+    } catch (e) {
+      if (live(ep)) toast("error", errorMessageOf(e));
+    }
+  }));
+
+  exportBtn.addEventListener("click", async () => {
+    const s = app.get();
+    const p = s.draft ?? s.sensor;
+    if (!p) return;
+    try {
+      const path = await save({ defaultPath: "ld2402-config.json", filters: [{ name: t("params.jsonFilter"), extensions: ["json"] }] });
+      if (!path) return;
+      await exportConfig(path, p);
+      toast("success", t("params.exported"));
+    } catch (e) {
+      toast("error", errorMessageOf(e));
+    }
+  });
+
+  importBtn.addEventListener("click", () => void guarded(async () => {
+    try {
+      const path = await open({ multiple: false, filters: [{ name: t("params.jsonFilter"), extensions: ["json"] }] });
+      if (!path || Array.isArray(path)) return;
+      const p = await importConfig(path);
+      app.set({ draft: p });
+      toast("info", t("params.imported"));
+    } catch (e) {
+      toast("error", errorMessageOf(e));
+    }
+  }));
+
+  app.subscribe(render);
+  onConnected(() => { epoch++; });
+  onDisconnect(() => { epoch++; });
+  onLocaleChange(() => { renderI18n(el); render(); });
+  renderI18n(el);
+  render();
+}

@@ -1,7 +1,10 @@
 import { connect, disconnect, listPorts, onDisconnected, ApiError } from "../api";
 import { availableLocales, getLocale, onLocaleChange, renderI18n, setLocale, t } from "../i18n";
+import { isDirty } from "../state/draft";
 import { app, type ViewId } from "../state/store";
+import { errorMessage } from "./errors";
 import { toast } from "./notify";
+import { confirmDiscardIfDirty } from "./paramsPanel";
 
 const THEME_KEY = "ld2402.theme";
 const ic = (d: string) => `<svg class="i" viewBox="0 0 24 24">${d}</svg>`;
@@ -102,11 +105,13 @@ export function mountShell(root: HTMLElement): void {
     const s = app.get();
     if (s.connection === "connecting") return;
     if (s.connection === "connected") {
+      if (isDirty(s.sensor, s.draft) && !(await confirmDiscardIfDirty())) return;
       try { await disconnect(); } catch { /* state is reset regardless */ }
       app.set({ connection: "disconnected", info: null, streaming: false, lastFrame: null });
       return;
     }
     if (!select.value) return;
+    if (isDirty(s.sensor, s.draft) && !(await confirmDiscardIfDirty())) return;
     app.set({ connection: "connecting", port: select.value });
     try {
       const info = await connect(select.value);
@@ -118,21 +123,19 @@ export function mountShell(root: HTMLElement): void {
     }
   }
 
-  function errorMessage(data: Record<string, unknown>): string {
-    const kind = String(data.kind);
-    const params = data as Record<string, string | number>;
-    if (kind === "config") return t("errors.config." + String(data.reason), params);
-    const key = "errors." + kind;
-    return t(key, params) === key ? t("errors.unknown") : t(key, params);
-  }
-
   // --- events
   root.querySelectorAll<HTMLElement>(".rail [data-view]").forEach((b) =>
     b.addEventListener("click", () => app.set({ view: b.dataset.view as ViewId })),
   );
   $("#refresh-ports").addEventListener("click", () => void refreshPorts());
   connectBtn.addEventListener("click", () => void toggleConnection());
-  select.addEventListener("change", update);
+  let lastPort = "";
+  select.addEventListener("focus", () => { lastPort = select.value; });
+  select.addEventListener("change", async () => {
+    if (lastPort && select.value !== lastPort && !(await confirmDiscardIfDirty())) select.value = lastPort;
+    lastPort = select.value;
+    update();
+  });
   $("#theme-toggle").addEventListener("click", () => {
     const next = document.body.dataset.theme === "light" ? "dark" : "light";
     document.body.dataset.theme = next;

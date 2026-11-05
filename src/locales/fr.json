@@ -45,8 +45,8 @@
   "params.dirty": "Non écrit dans le capteur",
   "params.permanentSave": "sauvegarde permanente incluse",
   "params.write": "Écrire",
-  "params.export": "Exporter .xml",
-  "params.import": "Importer .xml",
+  "params.export": "Exporter .json",
+  "params.import": "Importer .json",
   "table.title": "Seuils par porte",
   "table.hint": "Valeurs en dB, 0 à 95, au centième.",
   "table.gate": "Porte",
@@ -103,5 +103,15 @@
   "status.preview": "Aperçu avec les seuils non écrits : {state}",
   "status.waiting": "En attente de données…",
   "units.m": "m",
-  "units.s": "s"
+  "units.s": "s",
+  "params.undo": "Annuler les modifications",
+  "params.written": "Paramètres écrits dans le capteur.",
+  "params.exported": "Configuration exportée.",
+  "params.imported": "Configuration importée. Clique sur Écrire pour l'appliquer.",
+  "params.confirmDiscard": "Des modifications n'ont pas été écrites dans le capteur. Les abandonner ?",
+  "params.confirmReload": "La relecture abandonnera tes modifications non écrites. Continuer ?",
+  "params.discardTitle": "Modifications non écrites",
+  "table.close": "Fermer",
+  "units.db": "dB",
+  "params.jsonFilter": "Configuration (JSON)"
 }

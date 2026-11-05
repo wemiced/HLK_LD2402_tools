@@ -45,8 +45,8 @@
   "params.dirty": "Not written to the sensor",
   "params.permanentSave": "permanent save included",
   "params.write": "Write",
-  "params.export": "Export .xml",
-  "params.import": "Import .xml",
+  "params.export": "Export .json",
+  "params.import": "Import .json",
   "table.title": "Thresholds per gate",
   "table.hint": "Values in dB, 0 to 95, to the hundredth.",
   "table.gate": "Gate",
@@ -103,5 +103,15 @@
   "status.preview": "Preview with unsaved thresholds: {state}",
   "status.waiting": "Waiting for data…",
   "units.m": "m",
-  "units.s": "s"
+  "units.s": "s",
+  "params.undo": "Undo changes",
+  "params.written": "Parameters written to the sensor.",
+  "params.exported": "Configuration exported.",
+  "params.imported": "Configuration imported. Click Write to apply it.",
+  "params.confirmDiscard": "You have changes that were not written to the sensor. Discard them?",
+  "params.confirmReload": "Re-reading will discard your unwritten changes. Continue?",
+  "params.discardTitle": "Unsaved changes",
+  "table.close": "Close",
+  "units.db": "dB",
+  "params.jsonFilter": "Configuration (JSON)"
 }
