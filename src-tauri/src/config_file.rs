@@ -29,10 +29,23 @@ pub fn to_json(p: &SensorParams, firmware: Option<&str>) -> String {
         "version": VERSION,
         "firmware": firmware,
         "savedAt": rfc3339_utc(secs),
-        "params": p,
+        "params": {
+            "maxDistanceM": round_to(p.max_distance_m, 10.0),
+            "disappearDelayS": p.disappear_delay_s,
+            "triggerDb": p.trigger_db.iter().map(|x| round_to(*x, 100.0)).collect::<Vec<_>>(),
+            "microDb": p.micro_db.iter().map(|x| round_to(*x, 100.0)).collect::<Vec<_>>(),
+        },
     });
     serde_json::to_string_pretty(&v).expect("config serializes")
 }
+
+/// Round an f32 to a decimal f64 (scale 10 -> 0.1, 100 -> 0.01) so files read "0.7", not 0.699999988.
+fn round_to(x: f32, scale: f64) -> f64 {
+    (f64::from(x) * scale).round() / scale
+}
+
+/// Tolerance for boundary comparisons (accepts f32-widened values from older files).
+const EPS: f64 = 1e-6;
 
 fn oor(field: &str) -> ConfigError {
     ConfigError::OutOfRange { field: field.to_string() }
@@ -40,7 +53,7 @@ fn oor(field: &str) -> ConfigError {
 
 fn number_in(v: Option<&Value>, lo: f64, hi: f64, field: &str) -> Result<f64, ConfigError> {
     match v.and_then(Value::as_f64) {
-        Some(n) if n.is_finite() && (lo..=hi).contains(&n) => Ok(n),
+        Some(n) if n.is_finite() && n >= lo - EPS && n <= hi + EPS => Ok(n.clamp(lo, hi)),
         _ => Err(oor(field)),
     }
 }
@@ -226,5 +239,36 @@ mod tests {
         assert_eq!(rfc3339_utc(1793886483), "2026-11-05T13:48:03Z");
         assert_eq!(rfc3339_utc(0), "1970-01-01T00:00:00Z");
         assert_eq!(rfc3339_utc(951782400), "2000-02-29T00:00:00Z");
+    }
+
+    #[test]
+    fn roundtrip_boundaries_and_rounded_export() {
+        for d in [0.7f32, 10.0] {
+            let mut p = SensorParams::default_for_tests();
+            p.max_distance_m = d;
+            p.trigger_db[0] = 95.0;
+            p.trigger_db[1] = 0.0;
+            p.micro_db[2] = 41.37;
+            let text = to_json(&p, None);
+            assert_eq!(from_json(&text).unwrap(), p);
+            assert!(text.contains("41.37") && !text.contains("41.369"));
+        }
+        let mut p = SensorParams::default_for_tests();
+        p.max_distance_m = 0.7;
+        assert!(to_json(&p, None).contains("\"maxDistanceM\": 0.7,"));
+    }
+
+    #[test]
+    fn accepts_f32_widened_boundary() {
+        let mut p = good();
+        p["maxDistanceM"] = json!(0.699999988079071);
+        assert!(from_json(&doc(p)).is_ok());
+    }
+
+    #[test]
+    fn rejects_fractional_delay() {
+        let mut p = good();
+        p["disappearDelayS"] = json!(30.5);
+        assert_eq!(from_json(&doc(p)), Err(oor("disappearDelayS")));
     }
 }
