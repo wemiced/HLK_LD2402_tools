@@ -211,3 +211,21 @@ it("Write/Re-read/Import are disabled while calibrating or auto-gaining; a write
   await wait();
   expect(app.get().paramsBusy).toBe(false);
 });
+
+it("gate table and sliders are not editable while a device operation runs", async () => {
+  const d = document.getElementById("d")!;
+  mountGateTable(d);
+  const inp = d.querySelector<HTMLInputElement>("tbody input")!;
+  expect(inp.disabled).toBe(false);
+  for (const lock of [{ calibrating: true }, { autoGaining: true }, { paramsBusy: true }, { connection: "disconnected" as const }]) {
+    app.set({ connection: "connected", calibrating: false, autoGaining: false, paramsBusy: false, ...lock });
+    expect(inp.disabled).toBe(true);
+    expect(q<HTMLInputElement>("dist").disabled).toBe(true);
+    inp.value = "12";
+    inp.dispatchEvent(new Event("input"));
+    slide("dist", "6");
+    expect(app.get().draft).toEqual(params);
+  }
+  app.set({ connection: "connected", calibrating: false, autoGaining: false, paramsBusy: false });
+  expect(inp.disabled).toBe(false);
+});

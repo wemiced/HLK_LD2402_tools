@@ -97,6 +97,7 @@ td input{width:76px;background:var(--surface-2);border:1px solid var(--border);b
 .gates span.bad{background:var(--present-soft);color:var(--present);outline:1px solid var(--present)}
 .drop{border:2px dashed var(--border);border-radius:12px;padding:28px;text-align:center;color:var(--muted)}
 .disabled{opacity:.45;cursor:not-allowed}
+input:disabled{opacity:.45;cursor:not-allowed}
 .tag{font-size:11px;padding:2px 7px;border-radius:999px;background:var(--surface-2);color:var(--muted)}
 .port{display:flex;align-items:center;gap:6px}
 .iconbtn{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}

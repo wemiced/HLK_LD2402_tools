@@ -53,6 +53,10 @@ export const app = createStore<AppState>({
   series: "trigger",
 });
 
+/** Draft edits are allowed only while connected and no device operation could overwrite them. */
+export const canEdit = (s: AppState): boolean =>
+  s.connection === "connected" && !s.paramsBusy && !s.calibrating && !s.autoGaining;
+
 function onTransition(to: AppState["connection"], fn: () => void): () => void {
   let prev = app.get().connection;
   return app.subscribe((s) => {

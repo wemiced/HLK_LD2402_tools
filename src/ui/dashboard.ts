@@ -1,7 +1,7 @@
 import { ApiError, onFrame, readParams, setStreaming } from "../api";
 import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
 import { isDirty, previewPresence, setThreshold } from "../state/draft";
-import { app, onConnected, onDisconnect } from "../state/store";
+import { app, canEdit, onConnected, onDisconnect } from "../state/store";
 import type { PresenceKind } from "../types";
 import { createDistanceChart } from "./distanceChart";
 import { createEnergyChart } from "./energyChart";
@@ -61,11 +61,13 @@ export function mountDashboard(el: HTMLElement): void {
   const orb = q("orb"), label = q("label"), dist = q("dist"), state = q("state");
   const preview = q("preview"), since = q("since"), pause = q<HTMLButtonElement>("pause");
 
-  const energy = createEnergyChart(q<HTMLCanvasElement>("bars"), {
+  const bars = q<HTMLCanvasElement>("bars");
+  const energy = createEnergyChart(bars, {
+    canDrag: () => canEdit(app.get()),
     onDrag(gate, db) {
       const s = app.get();
       const base = s.draft ?? s.sensor;
-      if (!base) return;
+      if (!base || !canEdit(s)) return;
       app.set({ draft: setThreshold(base, s.series, gate, db) });
     },
   });
@@ -118,6 +120,9 @@ export function mountDashboard(el: HTMLElement): void {
     preview.textContent = showPreview ? t("status.preview", { state: t(STATE_KEY[previewPresence(f!, p!)]) }) : "";
     pause.disabled = !connected || s.calibrating || s.autoGaining;
     pause.textContent = (s.streaming ? "⏸ " : "▶ ") + t(s.streaming ? "status.pause" : "status.resume");
+    const editable = canEdit(s) && !!p;
+    bars.classList.toggle("disabled", !editable);
+    bars.style.cursor = editable ? "ns-resize" : "not-allowed";
     energy.render(connected ? f : null, p, s.series);
     line.render();
   }

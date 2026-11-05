@@ -34,7 +34,7 @@ export function hitThreshold(y: number, thresholdDb: number | undefined, plotH: 
 
 export function createEnergyChart(
   canvas: HTMLCanvasElement,
-  opts: { onDrag: (gate: number, db: number) => void },
+  opts: { onDrag: (gate: number, db: number) => void; canDrag?: () => boolean },
 ): { render(frame: FrameDto | null, params: SensorParams | null, series: "trigger" | "micro"): void } {
   let last: { frame: FrameDto | null; params: SensorParams | null; series: "trigger" | "micro" } = {
     frame: null, params: null, series: "trigger",
@@ -47,10 +47,9 @@ export function createEnergyChart(
   };
   const plotH = HEIGHT - P.t - P.b;
 
-  canvas.style.cursor = "ns-resize";
   canvas.style.touchAction = "none";
   canvas.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || opts.canDrag?.() === false) return;
     const p = local(e);
     const g = gateAtX(p.x, p.plotW);
     if (g === null) return;
@@ -62,6 +61,7 @@ export function createEnergyChart(
   });
   canvas.addEventListener("pointermove", (e) => {
     if (drag === null) return;
+    if (opts.canDrag?.() === false) { drag = null; return; }
     opts.onDrag(drag, yToDb(local(e).y, plotH));
   });
   const end = () => { drag = null; };

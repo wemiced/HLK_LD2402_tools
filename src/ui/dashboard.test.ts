@@ -154,3 +154,29 @@ it("reconnect with a failing initial read drops the previous session's params", 
   expect(panel.querySelector<HTMLInputElement>('[data-role="dist"]')!.disabled).toBe(true);
   expect(panel.querySelector('[data-role="distVal"]')!.textContent).toBe("—");
 });
+
+it("threshold drag is ignored while calibrating, auto-gaining or busy", async () => {
+  app.set({ calibrating: false, autoGaining: false, paramsBusy: false, series: "trigger" });
+  app.set({ connection: "connected" });
+  await wait();
+  const bars = el.querySelector<HTMLCanvasElement>('[data-role="bars"]')!;
+  bars.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 230, right: 400, bottom: 230, x: 0, y: 0, toJSON: () => ({}) });
+  // gate 0, on its 40 dB trigger line (plot height 198, top padding 8)
+  const at = (type: string, clientY: number) =>
+    bars.dispatchEvent(new MouseEvent(type, { button: 0, clientX: 40, clientY, bubbles: true }));
+  for (const lock of [{ calibrating: true }, { autoGaining: true }, { paramsBusy: true }]) {
+    app.set({ calibrating: false, autoGaining: false, paramsBusy: false, ...lock });
+    await wait();
+    at("pointerdown", 123);
+    at("pointermove", 60);
+    at("pointerup", 60);
+    expect(app.get().draft).toEqual(params);
+    expect(bars.classList.contains("disabled")).toBe(true);
+  }
+  app.set({ calibrating: false, autoGaining: false, paramsBusy: false });
+  await wait();
+  expect(bars.classList.contains("disabled")).toBe(false);
+  at("pointerdown", 123);
+  at("pointerup", 123);
+  expect(app.get().draft!.triggerDb[0]).not.toBe(40);
+});

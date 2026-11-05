@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exportConfig, importConfig, readParams, writeParams } from "../api";
 import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
 import { clampParams, isDirty } from "../state/draft";
-import { app, onConnected, onDisconnect } from "../state/store";
+import { app, canEdit, onConnected, onDisconnect } from "../state/store";
 import { errorMessageOf } from "./errors";
 import { mountGateTable } from "./gateTable";
 import { toast } from "./notify";
@@ -97,7 +97,7 @@ export function mountParamsPanel(el: HTMLElement): void {
     const dirty = dirtyNow();
     dirtyEl.classList.toggle("show", dirty);
     perm.hidden = !s.info?.capabilities.permanentSave;
-    const edit = !!p && connected;
+    const edit = !!p && canEdit(s);
     dist.disabled = delay.disabled = delayNum.disabled = !edit;
     // the device answers Busy while a calibration or an auto-gain runs
     const blocked = s.paramsBusy || s.calibrating || s.autoGaining;
@@ -112,7 +112,7 @@ export function mountParamsPanel(el: HTMLElement): void {
   function edit(patch: Partial<{ maxDistanceM: number; disappearDelayS: number }>): void {
     const s = app.get();
     const base = s.draft ?? s.sensor;
-    if (!base) return;
+    if (!base || !canEdit(s)) return;
     app.set({ draft: clampParams({ ...base, ...patch }) });
   }
   dist.addEventListener("input", () => edit({ maxDistanceM: Number(dist.value) }));

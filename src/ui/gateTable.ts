@@ -1,6 +1,6 @@
 import { formatNumber, onLocaleChange, renderI18n } from "../i18n";
 import { gatesInRange, setThreshold } from "../state/draft";
-import { app } from "../state/store";
+import { app, canEdit } from "../state/store";
 
 const GATE_M = 0.7;
 
@@ -33,7 +33,7 @@ export function mountGateTable(drawer: HTMLElement): { open(): void; close(): vo
         if (v === null) return;
         const s = app.get();
         const base = s.draft ?? s.sensor;
-        if (base) app.set({ draft: setThreshold(base, k === 0 ? "trigger" : "micro", i, v) });
+        if (base && canEdit(s)) app.set({ draft: setThreshold(base, k === 0 ? "trigger" : "micro", i, v) });
       });
       inp.addEventListener("blur", () => { inp.classList.remove("invalid"); sync(); });
     });
@@ -43,6 +43,7 @@ export function mountGateTable(drawer: HTMLElement): { open(): void; close(): vo
     const s = app.get();
     const p = s.draft ?? s.sensor;
     const n = p ? gatesInRange(p.maxDistanceM) : 16;
+    const editable = !!p && canEdit(s);
     rows.forEach((tr, i) => {
       tr.classList.toggle("off", i >= n);
       tr.querySelector('[data-role="range"]')!.textContent =
@@ -50,7 +51,7 @@ export function mountGateTable(drawer: HTMLElement): { open(): void; close(): vo
     });
     (["triggerDb", "microDb"] as const).forEach((key, k) => {
       inputs[k].forEach((inp, i) => {
-        inp.disabled = !p;
+        inp.disabled = !editable;
         if (document.activeElement === inp) return;
         inp.value = p ? formatNumber(p[key][i], 2) : "";
       });
