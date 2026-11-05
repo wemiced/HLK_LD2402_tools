@@ -142,12 +142,12 @@ struct Link {
 
 impl Link {
     fn request(&self, word: u16, value: &[u8], timeout: Duration, attempts: u32) -> Reply {
-        if self.dead.load(Ordering::SeqCst) {
-            return Err(DeviceError::Disconnected);
-        }
         if let Err(f) = crate::protocol::safety::check(word, value) {
             eprintln!("blocked command {:#06x}: {}", f.word, f.reason);
             return Err(DeviceError::Forbidden { word: f.word });
+        }
+        if self.dead.load(Ordering::SeqCst) {
+            return Err(DeviceError::Disconnected);
         }
         let (reply, rx) = mpsc::channel();
         let req = Request {
@@ -354,10 +354,13 @@ fn identify(link: &Link, entered: &mut bool) -> Result<DeviceInfo, DeviceError> 
     let _ = link.quick(CMD_OUTPUT_MODE, &mode_value(MODE_NORMAL));
     let firmware = parse_version_ack(&link.cmd(CMD_READ_VERSION, &[])?).map_err(proto_err)?;
     let caps = capabilities(parse_version(&firmware));
+    // Manual 5.2.4: the only serial-number command is 0x0011; before v3.3.5
+    // it answers with raw bytes instead of ASCII.
+    let sn = link.cmd(CMD_READ_SN_TEXT, &[])?;
     let serial = if caps.serial_text {
-        parse_sn_text(&link.cmd(CMD_READ_SN_TEXT, &[])?)
+        parse_sn_text(&sn)
     } else {
-        parse_sn_hex(&link.cmd(CMD_READ_SN_HEX, &[])?)
+        parse_sn_hex(&sn)
     };
     let power = match link.cmd(CMD_READ_PARAMS, &read_params_value(&[P_POWER_INTERFERENCE])) {
         Ok(rest) => power_status(parse_param_values(&rest, 1).ok().map(|v| v[0])),
@@ -621,6 +624,8 @@ impl Drop for Device {
     }
 }
 
+#[cfg(test)]
+mod conformity_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
 #[cfg(test)]

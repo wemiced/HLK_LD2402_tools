@@ -20,7 +20,6 @@ impl RecordingTransport {
     pub(crate) fn frames_handle(&self) -> Frames {
         Arc::clone(&self.frames)
     }
-    #[allow(dead_code)] // used by Task 2
     pub(crate) fn sim_handle(&self) -> SimHandle {
         self.inner.sim_handle()
     }

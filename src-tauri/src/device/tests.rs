@@ -121,7 +121,7 @@ fn open_reads_info() {
 #[test]
 fn open_reads_hex_serial_on_old_firmware() {
     let (d, _h, _rx) = open(version("v3.3.1"));
-    assert_eq!(d.info().serial, "4CD24002A17B0019");
+    assert_eq!(d.info().serial, "250318");
     assert!(!d.info().capabilities.serial_text);
 }
 
@@ -444,4 +444,21 @@ fn guard_blocks_out_of_range_write() {
 #[test]
 fn guard_blocks_unknown_word() {
     guard_case(0x00A0, &[]);
+}
+
+#[test]
+fn guard_runs_before_the_dead_check() {
+    let (d, frames) = open_recording();
+    d.link.dead.store(true, Ordering::SeqCst);
+    let before = frames.lock().unwrap().len();
+    assert_eq!(
+        d.raw_cmd_for_tests(0x00A0, &[]),
+        Err(DeviceError::Forbidden { word: 0x00A0 })
+    );
+    assert_eq!(frames.lock().unwrap().len(), before);
+    // A permitted word on a dead link is still Disconnected.
+    assert_eq!(
+        d.raw_cmd_for_tests(0x0000, &[]),
+        Err(DeviceError::Disconnected)
+    );
 }

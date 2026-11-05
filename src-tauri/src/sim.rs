@@ -1,6 +1,6 @@
 //! Sensor simulator: answers the LD2402 command set and streams data, no hardware needed.
 use crate::protocol::commands::*;
-use crate::protocol::convert::db_to_raw;
+use crate::protocol::convert::{capabilities, db_to_raw, parse_version};
 use crate::protocol::frame::*;
 use crate::transport::Transport;
 use std::collections::VecDeque;
@@ -148,6 +148,10 @@ impl State {
         }
     }
 
+    fn serial_is_hex(&self) -> bool {
+        !capabilities(parse_version(&self.opts.version)).serial_text
+    }
+
     fn handle_config(&mut self, f: &CmdFrame) -> Vec<u8> {
         let w = f.word;
         match w {
@@ -162,6 +166,10 @@ impl State {
                 0,
                 &len_prefixed(&[0x4C, 0xD2, 0x40, 0x02, 0xA1, 0x7B, 0x00, 0x19]),
             ),
+            // Before v3.3.5 the 0x0011 answer is raw bytes, not ASCII.
+            CMD_READ_SN_TEXT if self.serial_is_hex() => {
+                ack(w, 0, &len_prefixed(&[0x25, 0x03, 0x18]))
+            }
             CMD_READ_SN_TEXT => ack(w, 0, &len_prefixed(b"SIM-LD2402-0001")),
             CMD_READ_PARAMS => {
                 let mut vals = vec![];
@@ -477,6 +485,30 @@ mod tests {
         assert!(!parse_sn_hex(parse_status(&a).unwrap()).is_empty());
         let a = ask(&mut s, &mut d, CMD_READ_SN_TEXT, &[]);
         assert!(!parse_sn_text(parse_status(&a).unwrap()).is_empty());
+    }
+
+    #[test]
+    fn sim_serial_0x0011_is_hex_before_3_3_5_and_ascii_after() {
+        for (version, expect) in [
+            ("v3.3.4", "250318"),
+            ("garbage", "250318"),
+            ("v3.3.5", "SIM-LD2402-0001"),
+        ] {
+            let mut s = SimSensor::new(SimOptions {
+                version: version.into(),
+                ..Default::default()
+            });
+            let mut d = FrameDecoder::new();
+            enable(&mut s, &mut d);
+            let a = ask(&mut s, &mut d, CMD_READ_SN_TEXT, &[]);
+            let rest = parse_status(&a).unwrap();
+            let got = if expect == "250318" {
+                parse_sn_hex(rest)
+            } else {
+                parse_sn_text(rest)
+            };
+            assert_eq!(got, expect, "{version}");
+        }
     }
 
     #[test]

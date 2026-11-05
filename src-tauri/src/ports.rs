@@ -40,12 +40,12 @@ fn wait_ack(
     None
 }
 
-/// Checks whether the transport talks like an LD2402. Always sends end-config.
 fn guarded_write(t: &mut dyn Transport, word: u16, value: &[u8]) -> bool {
     crate::protocol::safety::check(word, value).is_ok()
         && t.write_all(&encode_command(word, value)).is_ok()
 }
 
+/// Checks whether the transport talks like an LD2402. Always sends end-config.
 pub fn probe(t: &mut dyn Transport, timeout_ms: u64) -> bool {
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     let mut dec = FrameDecoder::new();

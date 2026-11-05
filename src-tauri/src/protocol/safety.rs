@@ -143,8 +143,36 @@ mod tests {
     #[test]
     fn rejects_unknown_words() {
         for w in [0x0001, 0x0010, 0x00A0, 0x00F0, 0x0100, 0xFFFF] {
-            assert!(check(w, &[]).is_err());
+            assert_eq!(check(w, &[]).unwrap_err().word, w);
         }
+    }
+    #[test]
+    fn exact_boundaries() {
+        use crate::protocol::convert::db_to_raw;
+        let w1 = |id: u16, v: u32| {
+            let mut b = id.to_le_bytes().to_vec();
+            b.extend(v.to_le_bytes());
+            b
+        };
+        // max distance: 7..=100
+        assert!(check(0x0007, &w1(0x0001, 101)).is_err());
+        assert!(check(0x0007, &w1(0x0001, 100)).is_ok());
+        assert!(check(0x0007, &w1(0x0001, 7)).is_ok());
+        assert!(check(0x0007, &w1(0x0001, 6)).is_err());
+        // gate threshold: 0..=db_to_raw(95.0)
+        assert!(check(0x0007, &w1(0x0010, db_to_raw(95.0))).is_ok());
+        assert!(check(0x0007, &w1(0x0010, db_to_raw(95.0) + 1)).is_err());
+        assert!(check(0x0007, &w1(0x0030, db_to_raw(95.0) + 1)).is_err());
+        // read-params: odd length
+        assert!(check(0x0008, &[0x01, 0x00, 0x04]).is_err());
+        // calibration: exactly 6 bytes, each 10..=200
+        for bad in [5usize, 7] {
+            assert!(check(0x0009, &vec![10; bad]).is_err(), "{bad} bytes");
+        }
+        assert!(check(0x0009, &[10, 0, 10, 0, 10, 0]).is_ok());
+        assert!(check(0x0009, &[200, 0, 200, 0, 200, 0]).is_ok());
+        assert!(check(0x0009, &[9, 0, 10, 0, 10, 0]).is_err());
+        assert!(check(0x0009, &[201, 0, 200, 0, 200, 0]).is_err());
     }
     #[test]
     fn rejects_bad_values() {
