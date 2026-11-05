@@ -1,4 +1,5 @@
 pub mod device;
+pub mod ports;
 pub mod protocol;
 pub mod sim;
 pub mod transport;
