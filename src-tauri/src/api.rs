@@ -1,6 +1,6 @@
 //! Tauri command and event layer: thin DTO mapping over the device core.
 use crate::config_file::{self, ClampedField, ConfigError};
-use crate::device::{CalibCoefficients, Device, DeviceError, DeviceEvent, DeviceInfo};
+use crate::device::{BackupFn, CalibCoefficients, Device, DeviceError, DeviceEvent, DeviceInfo};
 use crate::ports::{self, PortInfo};
 use crate::protocol::commands::{CMD_READ_VERSION, SensorParams};
 use crate::protocol::convert::raw_to_db;
@@ -9,6 +9,7 @@ use crate::sim::{SimOptions, SimSensor};
 use crate::snapshots::{SnapshotKind, SnapshotMeta, SnapshotStore, serial_key};
 use crate::transport::{Transport, open_serial};
 use serde::Serialize;
+use std::cell::Cell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::SystemTime;
@@ -198,12 +199,43 @@ impl AppState {
         self.store.get()
     }
 
-    /// Saves a pre-change backup of `current`; Err blocks the change.
+    /// Saves the first-connection snapshot if it is still missing (it may
+    /// have failed at connect), then a pre-change backup, both from the
+    /// same pre-change values `current`. Err blocks the change.
     fn backup(&self, serial: &str, fw: &str, current: &SensorParams) -> Result<(), String> {
-        self.store()
-            .ok_or_else(|| NO_STORE.to_string())?
-            .save_backup(serial, fw, current)
-            .map(drop)
+        let store = self.store().ok_or_else(|| NO_STORE.to_string())?;
+        store.save_original_if_absent(serial, fw, current)?;
+        store.save_backup(serial, fw, current).map(drop)
+    }
+
+    /// Runs a change on the device with the pre-change backup hook bound to
+    /// the connected sensor, or fails with `Disconnected`.
+    fn guarded<T>(
+        &self,
+        f: impl FnOnce(&Device, &BackupFn<'_>) -> Result<T, DeviceError>,
+    ) -> ApiResult<T> {
+        let mut g = self.lock();
+        let c = g.as_mut().ok_or(DeviceError::Disconnected)?;
+        let info = c.device.info();
+        let backed_up = Cell::new(false);
+        let r = f(&c.device, &|cur| {
+            self.backup(&info.serial, &info.firmware, cur)?;
+            backed_up.set(true);
+            Ok(())
+        });
+        // The first-connection snapshot now exists for this connection.
+        if backed_up.get() {
+            c.original_error = None;
+        }
+        Ok(r?)
+    }
+
+    fn write(&self, params: &SensorParams) -> ApiResult<()> {
+        self.guarded(|d, backup| d.write_params_guarded(params, backup))
+    }
+
+    fn calibrate(&self, coeffs: CalibCoefficients) -> ApiResult<()> {
+        self.guarded(|d, backup| d.start_calibration_guarded(coeffs, backup))
     }
 
     /// Runs `f` on the device, or fails with `Disconnected`.
@@ -421,13 +453,7 @@ pub async fn read_params(app: AppHandle) -> ApiResult<SensorParams> {
 
 #[tauri::command]
 pub async fn write_params(app: AppHandle, params: SensorParams) -> ApiResult<()> {
-    blocking(app, move |s| {
-        s.with(|d| {
-            let info = d.info();
-            d.write_params_guarded(&params, &|cur| s.backup(&info.serial, &info.firmware, cur))
-        })
-    })
-    .await
+    blocking(app, move |s| s.write(&params)).await
 }
 
 #[tauri::command]
@@ -437,13 +463,7 @@ pub async fn set_streaming(app: AppHandle, on: bool) -> ApiResult<()> {
 
 #[tauri::command]
 pub async fn start_calibration(app: AppHandle, coeffs: CalibCoefficients) -> ApiResult<()> {
-    blocking(app, move |s| {
-        s.with(|d| {
-            let info = d.info();
-            d.start_calibration_guarded(coeffs, &|cur| s.backup(&info.serial, &info.firmware, cur))
-        })
-    })
-    .await
+    blocking(app, move |s| s.calibrate(coeffs)).await
 }
 
 #[tauri::command]
@@ -694,6 +714,39 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    /// The first-connection snapshot failed at connect: the next guarded
+    /// change saves it from the same pre-change values as the backup.
+    #[test]
+    fn guarded_write_saves_missing_original_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = AppState::default();
+        s.set_store(SnapshotStore::new(dir.path().to_path_buf()));
+        let sim = SimSensor::new(SimOptions::default());
+        let h = sim.sim_handle();
+        let d = Device::open(Box::new(sim), Box::new(|_| {})).unwrap();
+        let serial = d.info().serial;
+        let now = SystemTime::now();
+        s.install(1, d, now).unwrap();
+        s.lock().as_mut().unwrap().original_error = Some("disk was full".into());
+        let before = h.params();
+        let mut after = before.clone();
+        after.max_distance_m = 3.5;
+        after.trigger_db[2] = 61.0;
+        s.write(&after).unwrap();
+        assert_eq!(h.params(), after);
+        let st = s.store().unwrap();
+        let meta = st.original(&serial).expect("original saved by the write");
+        assert_eq!(st.load(&serial, &meta).unwrap().0, before);
+        let (_, _, err) = s.session().unwrap();
+        assert_eq!(err, None, "original error cleared once saved");
+        // A later change never replaces it.
+        let mut third = after.clone();
+        third.max_distance_m = 6.0;
+        s.write(&third).unwrap();
+        assert_eq!(st.load(&serial, &meta).unwrap().0, before);
+        s.close();
     }
 
     #[test]
