@@ -50,6 +50,7 @@ export interface PortInfo {
 export type DeviceError =
   | { kind: "permissionDenied"; path: string }
   | { kind: "notFound"; path: string }
+  | { kind: "inUse"; path: string }
   | { kind: "timeout"; word: number }
   | { kind: "nack"; word: number; status: number }
   | { kind: "unsupported"; feature: string; required: string }

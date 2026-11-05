@@ -75,6 +75,7 @@
   "calib.viewDashboard": "Voir sur le tableau de bord",
   "errors.permissionDenied": "Permission refusée sur {path}. Sous Linux, ajoutez-vous au groupe dialout : sudo usermod -aG dialout $USER, puis fermez et rouvrez votre session.",
   "errors.notFound": "Port {path} introuvable. Vérifiez que le capteur est branché.",
+  "errors.inUse": "{path} est utilisé par un autre programme (moniteur série, Arduino IDE, ModemManager…). Fermez-le puis réessayez.",
   "errors.timeout": "Le capteur n'a pas répondu à temps (commande {word}).",
   "errors.nack": "Le capteur a refusé la commande {word} (statut {status}).",
   "errors.unsupported": "{feature} n'est pas pris en charge par ce firmware (nécessite {required}).",

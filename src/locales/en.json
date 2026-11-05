@@ -75,6 +75,7 @@
   "calib.viewDashboard": "View on the dashboard",
   "errors.permissionDenied": "Permission denied on {path}. On Linux, add yourself to the dialout group: sudo usermod -aG dialout $USER, then log out and back in.",
   "errors.notFound": "Port {path} not found. Check that the sensor is plugged in.",
+  "errors.inUse": "{path} is in use by another program (serial monitor, Arduino IDE, ModemManager…). Close it and try again.",
   "errors.timeout": "The sensor did not answer in time (command {word}).",
   "errors.nack": "The sensor rejected command {word} (status {status}).",
   "errors.unsupported": "{feature} is not supported by this firmware (requires {required}).",

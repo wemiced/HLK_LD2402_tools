@@ -36,6 +36,8 @@ pub enum DeviceError {
     PermissionDenied { path: String },
     #[error("serial port {path} not found")]
     NotFound { path: String },
+    #[error("serial port {path} is in use by another program")]
+    InUse { path: String },
     #[error("no answer to command {word:#06x}")]
     Timeout { word: u16 },
     #[error("command {word:#06x} rejected with status {status}")]

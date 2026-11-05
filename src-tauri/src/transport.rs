@@ -33,6 +33,11 @@ pub(crate) fn map_open_error(e: serialport::Error, path: &str) -> DeviceError {
         ErrorKind::Io(io::ErrorKind::PermissionDenied) => {
             DeviceError::PermissionDenied { path: path.into() }
         }
+        // serialport maps EBUSY (port held by another program) to NoDevice:
+        // if the device node exists, it is in use rather than missing.
+        ErrorKind::NoDevice if std::path::Path::new(path).exists() => {
+            DeviceError::InUse { path: path.into() }
+        }
         ErrorKind::NoDevice | ErrorKind::Io(io::ErrorKind::NotFound) => {
             DeviceError::NotFound { path: path.into() }
         }
@@ -67,5 +72,26 @@ mod tests {
                 path: "/dev/ttyUSB0".into()
             }
         );
+    }
+
+    #[test]
+    fn no_device_on_existing_path_means_in_use() {
+        // serialport reports EBUSY (port held by another program) as NoDevice.
+        let path = std::env::temp_dir();
+        let path = path.to_str().unwrap();
+        let e = serialport::Error::new(serialport::ErrorKind::NoDevice, "busy");
+        assert_eq!(
+            map_open_error(e, path),
+            DeviceError::InUse { path: path.into() }
+        );
+        let e = serialport::Error::new(serialport::ErrorKind::NoDevice, "gone");
+        assert_eq!(
+            map_open_error(e, "/nonexistent/ttyUSB9"),
+            DeviceError::NotFound {
+                path: "/nonexistent/ttyUSB9".into()
+            }
+        );
+        let v = serde_json::to_value(DeviceError::InUse { path: "/dev/x".into() }).unwrap();
+        assert_eq!(v, serde_json::json!({"kind": "inUse", "path": "/dev/x"}));
     }
 }

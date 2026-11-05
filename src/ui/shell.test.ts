@@ -153,3 +153,13 @@ it("empty port list label is translated and survives a locale change", async () 
   expect(sel.options.length).toBe(1);
   expect(sel.options[0].textContent).toBe("Aucun port série trouvé");
 });
+
+it("a port held by another program gets its own message", async () => {
+  h.connect.mockRejectedValue(new h.ApiError({ kind: "inUse", path: "/dev/ttyUSB0" }));
+  connectBtn().click();
+  await flush();
+  const toast = document.querySelector(".toast.error")!;
+  expect(toast.textContent).toBe(
+    "/dev/ttyUSB0 is in use by another program (serial monitor, Arduino IDE, ModemManager…). Close it and try again.",
+  );
+});
