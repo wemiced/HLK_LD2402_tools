@@ -4,6 +4,7 @@ pub mod device;
 pub mod ports;
 pub mod protocol;
 pub mod sim;
+pub mod snapshots;
 pub mod transport;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

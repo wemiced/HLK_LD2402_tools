@@ -25,6 +25,9 @@ serialport = "4"
 thiserror = "2"
 tauri-plugin-dialog = "2"
 
+[dev-dependencies]
+tempfile = "3"
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

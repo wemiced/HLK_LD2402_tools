@@ -108,8 +108,118 @@ pub fn from_json(s: &str) -> Result<SensorParams, ConfigError> {
     })
 }
 
+/// A value that was outside its range and was clamped on a lenient read.
+#[derive(Serialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ClampedField {
+    pub field: String,
+    pub from: f64,
+    pub to: f64,
+}
+
+fn clamped_in(
+    v: Option<&Value>,
+    lo: f64,
+    hi: f64,
+    field: &str,
+    clamps: &mut Vec<ClampedField>,
+) -> Result<f64, ConfigError> {
+    match v.and_then(Value::as_f64) {
+        Some(n) if n.is_finite() => {
+            let to = n.clamp(lo, hi);
+            if (n - to).abs() > EPS {
+                clamps.push(ClampedField {
+                    field: field.to_string(),
+                    from: n,
+                    to,
+                });
+            }
+            Ok(to)
+        }
+        _ => Err(oor(field)),
+    }
+}
+
+fn lenient_db_array(
+    v: Option<&Value>,
+    name: &str,
+    clamps: &mut Vec<ClampedField>,
+) -> Result<[f32; 16], ConfigError> {
+    let arr = v
+        .and_then(Value::as_array)
+        .filter(|a| a.len() == 16)
+        .ok_or_else(|| oor(name))?;
+    let mut out = [0.0f32; 16];
+    for (i, item) in arr.iter().enumerate() {
+        out[i] = clamped_in(Some(item), 0.0, 95.0, &format!("{name}[{i}]"), clamps)? as f32;
+    }
+    Ok(out)
+}
+
+/// Like `from_json`, but out-of-range values are clamped and reported.
+/// Structure (format, version, array lengths, numbers) stays strict. Extra
+/// top-level fields (snapshot `serial`/`kind`) are ignored.
+pub fn from_json_lenient(s: &str) -> Result<(SensorParams, Vec<ClampedField>), ConfigError> {
+    let root: Value = serde_json::from_str(s).map_err(|_| ConfigError::NotAConfig)?;
+    let obj = root.as_object().ok_or(ConfigError::NotAConfig)?;
+    if obj.get("format").and_then(Value::as_str) != Some(FORMAT) {
+        return Err(ConfigError::NotAConfig);
+    }
+    let version = obj
+        .get("version")
+        .and_then(Value::as_u64)
+        .ok_or(ConfigError::NotAConfig)?;
+    if version > u64::from(VERSION) {
+        let version = u32::try_from(version).unwrap_or(u32::MAX);
+        return Err(ConfigError::UnsupportedVersion { version });
+    }
+    let params = obj
+        .get("params")
+        .and_then(Value::as_object)
+        .ok_or_else(|| oor("params"))?;
+    let mut clamps = Vec::new();
+    let max_distance_m = clamped_in(
+        params.get("maxDistanceM"),
+        0.7,
+        10.0,
+        "maxDistanceM",
+        &mut clamps,
+    )?;
+    let delay = clamped_in(
+        params.get("disappearDelayS"),
+        0.0,
+        65535.0,
+        "disappearDelayS",
+        &mut clamps,
+    )?;
+    if delay.fract() != 0.0 {
+        return Err(oor("disappearDelayS"));
+    }
+    let trigger_db = lenient_db_array(params.get("triggerDb"), "triggerDb", &mut clamps)?;
+    let micro_db = lenient_db_array(params.get("microDb"), "microDb", &mut clamps)?;
+    Ok((
+        SensorParams {
+            max_distance_m: max_distance_m as f32,
+            disappear_delay_s: delay as u16,
+            trigger_db,
+            micro_db,
+        },
+        clamps,
+    ))
+}
+
+/// Snapshot file content: the export format plus `serial` and `kind`.
+pub fn snapshot_json(p: &SensorParams, firmware: &str, serial: &str, kind: &str) -> String {
+    let mut v: Value =
+        serde_json::from_str(&to_json(p, Some(firmware))).expect("config is valid JSON");
+    let o = v.as_object_mut().expect("config is an object");
+    o.insert("serial".into(), Value::String(serial.to_string()));
+    o.insert("kind".into(), Value::String(kind.to_string()));
+    serde_json::to_string_pretty(&v).expect("snapshot serializes")
+}
+
 /// Format Unix seconds as RFC3339 UTC (civil-from-days algorithm).
-fn rfc3339_utc(secs: u64) -> String {
+pub(crate) fn rfc3339_utc(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let z = days + 719_468;
@@ -291,5 +401,60 @@ mod tests {
         let mut p = good();
         p["disappearDelayS"] = json!(30.5);
         assert_eq!(from_json(&doc(p)), Err(oor("disappearDelayS")));
+    }
+
+    #[test]
+    fn lenient_reports_clamps() {
+        let mut g = good();
+        g["maxDistanceM"] = json!(12.0);
+        g["triggerDb"][3] = json!(98.5);
+        let (p, clamps) = from_json_lenient(&doc(g)).unwrap();
+        assert_eq!(p.max_distance_m, 10.0);
+        assert_eq!(p.trigger_db[3], 95.0);
+        assert_eq!(
+            clamps,
+            vec![
+                ClampedField {
+                    field: "maxDistanceM".into(),
+                    from: 12.0,
+                    to: 10.0
+                },
+                ClampedField {
+                    field: "triggerDb[3]".into(),
+                    from: 98.5,
+                    to: 95.0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn lenient_accepts_snapshot_fields() {
+        let p = SensorParams {
+            max_distance_m: 5.0,
+            disappear_delay_s: 3,
+            trigger_db: [40.0; 16],
+            micro_db: [30.0; 16],
+        };
+        let s = snapshot_json(&p, "fw", "SN1", "original");
+        let (q, clamps) = from_json_lenient(&s).unwrap();
+        assert_eq!(q, p);
+        assert!(clamps.is_empty());
+        assert!(s.contains("\"serial\"") && s.contains("\"kind\""));
+    }
+
+    #[test]
+    fn lenient_still_rejects_structure() {
+        let bad = json!({"format":"nope","version":1,"params":good()}).to_string();
+        assert_eq!(from_json_lenient(&bad), Err(ConfigError::NotAConfig));
+        let mut g = good();
+        g["triggerDb"] = json!(vec![40.0; 15]);
+        assert_eq!(from_json_lenient(&doc(g)), Err(oor("triggerDb")));
+        let mut g = good();
+        g["maxDistanceM"] = json!("NaN");
+        assert_eq!(from_json_lenient(&doc(g)), Err(oor("maxDistanceM")));
+        let mut g = good();
+        g["disappearDelayS"] = json!(1.5);
+        assert_eq!(from_json_lenient(&doc(g)), Err(oor("disappearDelayS")));
     }
 }
