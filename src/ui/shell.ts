@@ -11,6 +11,7 @@ const VIEWS: { id: ViewId; icon: string }[] = [
   { id: "firmware", icon: ic('<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/>') },
 ];
 const MOON = ic('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>');
+const SUN = ic('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>');
 const GLOBE = ic('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>');
 
 function storeGet(k: string): string | null {
@@ -26,17 +27,17 @@ export function mountShell(root: HTMLElement): void {
   root.innerHTML = `
 <nav class="rail">
   <div class="logo">LD</div>
-  ${VIEWS.map((v) => `<button data-view="${v.id}">${v.icon}<span data-i18n="nav.${v.id}"></span></button>`).join("")}
+  ${VIEWS.map((v) => `<button data-view="${v.id}" data-i18n-aria="nav.${v.id}">${v.icon}<span data-i18n="nav.${v.id}"></span></button>`).join("")}
   <div class="spacer"></div>
-  <button id="lang-btn">${GLOBE}<span data-i18n="nav.language"></span></button>
-  <button id="theme-toggle">${MOON}<span data-i18n="nav.theme"></span></button>
+  <button id="lang-btn" data-i18n-aria="nav.language">${GLOBE}<span data-i18n="nav.language"></span></button>
+  <button id="theme-toggle" data-i18n-aria="nav.theme">${MOON}<span data-i18n="nav.theme"></span></button>
 </nav>
 <div class="langmenu" id="lang-menu"></div>
 <main>
   <header>
     <div><h1 id="title"></h1><div class="sub" id="sub"></div></div>
     <div class="grow"></div>
-    <div class="pill"><span class="dot" id="conn-dot"></span><select id="port-select"></select><button class="iconbtn" id="refresh-ports" data-i18n-title="conn.refresh">↻</button></div>
+    <div class="pill"><span class="dot" id="conn-dot"></span><select id="port-select"></select><button class="iconbtn" id="refresh-ports" data-i18n-title="conn.refresh" data-i18n-aria="conn.refresh">↻</button></div>
     <button class="btn" id="connect-btn"></button>
   </header>
   <div id="banners"></div>
@@ -67,7 +68,8 @@ export function mountShell(root: HTMLElement): void {
   }
   function renderPortLabels(): void {
     for (const o of Array.from(select.options)) {
-      o.textContent = o.dataset.label + (o.dataset.detected === "true" ? " — " + t("ports.detected") : "");
+      if (o.dataset.label === undefined) o.remove();
+      else o.textContent = o.dataset.label + (o.dataset.detected === "true" ? " — " + t("ports.detected") : "");
     }
     if (!select.options.length) {
       const o = document.createElement("option");
@@ -80,6 +82,8 @@ export function mountShell(root: HTMLElement): void {
   // --- render from state
   function update(): void {
     const s = app.get();
+    const themeBtn = $("#theme-toggle");
+    themeBtn.querySelector("svg")!.outerHTML = document.body.dataset.theme === "light" ? SUN : MOON;
     root.querySelectorAll<HTMLElement>(".rail [data-view]").forEach((b) => b.classList.toggle("on", b.dataset.view === s.view));
     root.querySelectorAll<HTMLElement>("section[data-view]").forEach((e) => e.classList.toggle("on", e.dataset.view === s.view));
     $("#title").textContent = t("nav." + s.view);
@@ -133,6 +137,7 @@ export function mountShell(root: HTMLElement): void {
     const next = document.body.dataset.theme === "light" ? "dark" : "light";
     document.body.dataset.theme = next;
     storeSet(THEME_KEY, next);
+    update();
   });
 
   function renderLangMenu(): void {

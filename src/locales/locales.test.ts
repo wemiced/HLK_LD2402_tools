@@ -17,7 +17,7 @@ it("every data-i18n / t() key in index.html and ui/*.ts exists in en", () => {
   const root = join(dir, "..");
   const srcs = [join(root, "..", "index.html")];
   for (const f of readdirSync(join(root, "ui"))) if (f.endsWith(".ts") && !f.endsWith(".test.ts")) srcs.push(join(root, "ui", f));
-  const re = /(?:\bt\(\s*|data-i18n(?:-title)?="|i18n:\s*)["'`]([a-zA-Z0-9_.]+)["'`]?/g;
+  const re = /(?:\bt\(\s*|data-i18n(?:-title|-aria)?="|i18n:\s*)["'`]([a-zA-Z0-9_.]+)["'`]?/g;
   const missing: string[] = [];
   for (const s of srcs) {
     const text = readFileSync(s, "utf8");
