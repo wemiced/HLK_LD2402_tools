@@ -32,10 +32,15 @@ pub struct SnapshotStore {
     root: PathBuf,
 }
 
-/// Folder name for a serial number: blank/all-F -> "unknown", unsafe chars -> `_`.
+/// Folder name for a serial number: blank -> "unknown", unsafe chars -> `_`.
+/// Blank means, once whitespace, NUL and U+FFFD (undecodable bytes such as
+/// 0xFF) are trimmed, nothing is left or no ASCII alphanumeric other than F.
 pub fn serial_key(serial: &str) -> String {
-    let t = serial.trim();
-    if t.is_empty() || t.chars().all(|c| c == 'F' || c == 'f') {
+    let t = serial.trim_matches(|c: char| c.is_whitespace() || c == '\0' || c == '\u{FFFD}');
+    if !t
+        .chars()
+        .any(|c| c.is_ascii_alphanumeric() && c != 'F' && c != 'f')
+    {
         return "unknown".into();
     }
     t.chars()
@@ -336,6 +341,38 @@ mod tests {
         assert_eq!(serial_key(""), "unknown");
         assert_eq!(serial_key("  "), "unknown");
         assert_eq!(serial_key("1A2B/3C"), "1A2B_3C");
+    }
+
+    /// Blank text-mode serials (0xFF / NUL bytes decoded lossily) are unknown.
+    #[test]
+    fn blank_text_serials_are_unknown() {
+        for s in [
+            "\u{FFFD}\u{FFFD}",
+            "\0\0\0\0",
+            "FFFFFFFF",
+            "ffff",
+            "",
+            "  ",
+            "\u{FFFD}\0 F\u{FFFD}",
+            "--__",
+        ] {
+            assert_eq!(serial_key(s), "unknown", "{s:?}");
+        }
+        assert_eq!(
+            serial_key(&crate::protocol::commands::parse_sn_text(&[
+                4, 0, 0xFF, 0xFF, 0xFF, 0xFF
+            ])),
+            "unknown"
+        );
+        assert_eq!(
+            serial_key(&crate::protocol::commands::parse_sn_text(&[
+                4, 0, 0, 0, 0, 0
+            ])),
+            "unknown"
+        );
+        // A real serial with stray bytes keeps a folder of its own.
+        assert_eq!(serial_key("\u{FFFD}AB12\0"), "AB12");
+        assert_eq!(serial_key("F0F0"), "F0F0");
     }
 
     #[test]
