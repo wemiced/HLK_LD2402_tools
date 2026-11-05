@@ -125,5 +125,20 @@
   "caps.requires": "Requires firmware {version} or later",
   "calib.gates": "Gates (70 cm each)",
   "calib.timeout": "The calibration did not finish: the sensor stopped responding.",
-  "autogain.timeout": "The gain adjustment did not finish in time."
+  "autogain.timeout": "The gain adjustment did not finish in time.",
+  "firmware.title": "Firmware",
+  "firmware.current": "Current: {version}",
+  "firmware.drop": "Drop a .bin file here",
+  "firmware.or": "or",
+  "firmware.choose": "Choose file…",
+  "firmware.update": "Update",
+  "firmware.keepPowered": "Do not unplug the sensor during an update.",
+  "firmware.unavailable": "Firmware update is not available yet: Hi-Link has not published the update protocol.",
+  "firmware.featuresTitle": "Features by version",
+  "firmware.colFeature": "Feature",
+  "firmware.colVersion": "Required version",
+  "firmware.featSave": "Permanent save",
+  "firmware.featGain": "Auto gain adjustment",
+  "firmware.featSerial": "Serial number (text)",
+  "firmware.olderHint": "On older firmware, the matching button is greyed out with an explanation."
 }

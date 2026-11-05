@@ -125,5 +125,20 @@
   "caps.requires": "Nécessite le firmware {version} ou plus récent",
   "calib.gates": "Portes (70 cm chacune)",
   "calib.timeout": "La calibration ne s'est pas terminée : le capteur ne répond plus.",
-  "autogain.timeout": "L'ajustement du gain ne s'est pas terminé à temps."
+  "autogain.timeout": "L'ajustement du gain ne s'est pas terminé à temps.",
+  "firmware.title": "Firmware",
+  "firmware.current": "Actuel : {version}",
+  "firmware.drop": "Glisse un fichier .bin ici",
+  "firmware.or": "ou",
+  "firmware.choose": "Choisir un fichier…",
+  "firmware.update": "Mettre à jour",
+  "firmware.keepPowered": "Ne débranche pas le capteur pendant la mise à jour.",
+  "firmware.unavailable": "La mise à jour du firmware n'est pas encore disponible : Hi-Link n'a pas publié le protocole de mise à jour.",
+  "firmware.featuresTitle": "Fonctions selon la version",
+  "firmware.colFeature": "Fonction",
+  "firmware.colVersion": "Version requise",
+  "firmware.featSave": "Sauvegarde permanente",
+  "firmware.featGain": "Ajustement auto du gain",
+  "firmware.featSerial": "Numéro de série (texte)",
+  "firmware.olderHint": "Sur un firmware plus ancien, le bouton correspondant est grisé avec une explication."
 }
