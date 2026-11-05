@@ -115,3 +115,9 @@ td input{width:76px;background:var(--surface-2);border:1px solid var(--border);b
 td input.invalid{border-color:var(--danger,#ff6b6b);outline:1px solid var(--danger,#ff6b6b)}
 tr.off td{opacity:.4}
 .drawer .mono{font-family:"JetBrains Mono",monospace;color:var(--muted)}
+/* calibration */
+.calib .notice{margin:10px 0;padding:10px 12px;border-radius:10px;background:var(--surface-2)}
+.spinner{width:12px;height:12px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:spin .8s linear infinite}
+.spinner[hidden]{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.banner .grow{flex:1}

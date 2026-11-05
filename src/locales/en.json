@@ -66,8 +66,8 @@
   "calib.step3": "3 · Result",
   "calib.step3Body": "Thresholds applied",
   "calib.coefTrigger": "Trigger coefficient",
-  "calib.coefHold": "Hold / micro-motion coefficient",
-  "calib.coefHint": "The higher the coefficient, the more sensitive the sensor (1.0 to 20.0).",
+  "calib.coefHold": "Hold coefficient",
+  "calib.coefHint": "Higher coefficient = more sensitive (1.0 to 20.0).",
   "calib.start": "Start",
   "calib.resultMinor": "Result · minor interference detected",
   "calib.resultBody": "Thresholds were generated and applied. Disturbances were seen on {count} gates: a moving object (fan, curtain) may be the cause.",
@@ -114,5 +114,14 @@
   "table.close": "Close",
   "units.db": "dB",
   "params.jsonFilter": "Configuration (JSON)",
-  "params.writtenRereadFailed": "Settings written, but re-reading them failed."
+  "params.writtenRereadFailed": "Settings written, but re-reading them failed.",
+  "calib.coefMicro": "Micro-motion coefficient",
+  "calib.connectFirst": "Connect a sensor first to run the calibration.",
+  "calib.measuring": "Measuring… stay out of the detection area.",
+  "calib.noInterference": "No interference",
+  "calib.noInterferenceBody": "Thresholds were generated and applied. No disturbance was seen on any gate.",
+  "calib.autoGaining": "Adjusting…",
+  "calib.autoGainDone": "Gain adjusted.",
+  "caps.requires": "Requires firmware {version} or later",
+  "calib.gates": "Gates (70 cm each)"
 }

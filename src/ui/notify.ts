@@ -1,3 +1,6 @@
+import { t } from "../i18n";
+import { app } from "../state/store";
+
 let toastBox: HTMLElement | null = null;
 
 export function showBanner(id: string, kind: "warning" | "info", html: string): void {
@@ -27,4 +30,25 @@ export function toast(kind: "error" | "success" | "info", message: string): void
   el.addEventListener("click", () => el.remove());
   toastBox.appendChild(el);
   if (kind !== "error") setTimeout(() => el.remove(), 5000);
+}
+
+const esc = (v: string) => v.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** Orange, dismissible banner under the header while the sensor reports a noisy power supply. */
+export function installPowerBanner(): void {
+  const sync = () => {
+    const s = app.get();
+    const on = s.connection === "connected" && s.info?.power === "interference";
+    const shown = !!document.querySelector('[data-banner="power"]');
+    if (!on) return hideBanner("power");
+    if (shown || dismissedFor === s.info) return;
+    showBanner("power", "warning", `⚠️ <b>${esc(t("banner.power.title"))}</b> — <span>${esc(t("banner.power.body"))}</span><div class="grow"></div><button class="btn sm ghost">${esc(t("banner.dismiss"))}</button>`);
+    document.querySelector('[data-banner="power"] button')?.addEventListener("click", () => {
+      dismissedFor = s.info;
+      hideBanner("power");
+    });
+  };
+  let dismissedFor: unknown = null;
+  app.subscribe(sync);
+  sync();
 }

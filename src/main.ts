@@ -6,7 +6,9 @@ import "@fontsource/jetbrains-mono/500.css";
 import "./styles/tokens.css";
 import "./styles/app.css";
 import { initLocale } from "./i18n";
+import { mountCalibration, mountCalibrationCard } from "./ui/calibration";
 import { dashboardSlot, mountDashboard } from "./ui/dashboard";
+import { installPowerBanner } from "./ui/notify";
 import { installCloseGuard, mountParamsPanel } from "./ui/paramsPanel";
 import { mountShell } from "./ui/shell";
 
@@ -15,3 +17,6 @@ mountDashboard(document.querySelector<HTMLElement>('section[data-view="dashboard
 initLocale();
 mountParamsPanel(dashboardSlot("params")!);
 void installCloseGuard();
+mountCalibration(document.querySelector<HTMLElement>('section[data-view="calibration"]')!);
+mountCalibrationCard(dashboardSlot("calib")!);
+installPowerBanner();

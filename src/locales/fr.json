@@ -66,7 +66,7 @@
   "calib.step3": "3 · Résultat",
   "calib.step3Body": "Seuils appliqués",
   "calib.coefTrigger": "Coefficient déclenchement",
-  "calib.coefHold": "Coefficient maintien / micro-mouvement",
+  "calib.coefHold": "Coefficient de maintien",
   "calib.coefHint": "Plus le coefficient est élevé, plus le capteur est sensible (1,0 à 20,0).",
   "calib.start": "Démarrer",
   "calib.resultMinor": "Résultat · interférences mineures détectées",
@@ -114,5 +114,14 @@
   "table.close": "Fermer",
   "units.db": "dB",
   "params.jsonFilter": "Configuration (JSON)",
-  "params.writtenRereadFailed": "Paramètres écrits, mais leur relecture a échoué."
+  "params.writtenRereadFailed": "Paramètres écrits, mais leur relecture a échoué.",
+  "calib.coefMicro": "Coefficient micro-mouvement",
+  "calib.connectFirst": "Connectez d'abord un capteur pour lancer la calibration.",
+  "calib.measuring": "Mesure en cours… restez hors de la zone de détection.",
+  "calib.noInterference": "Aucune interférence",
+  "calib.noInterferenceBody": "Les seuils ont été générés et appliqués. Aucune perturbation n'a été vue sur les portes.",
+  "calib.autoGaining": "Ajustement…",
+  "calib.autoGainDone": "Gain ajusté.",
+  "caps.requires": "Nécessite le firmware {version} ou plus récent",
+  "calib.gates": "Portes (70 cm chacune)"
 }
