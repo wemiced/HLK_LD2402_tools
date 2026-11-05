@@ -1,5 +1,6 @@
 import type { FrameDto, SensorParams } from "../types";
 import { gatesInRange } from "../state/draft";
+import { formatNumber } from "../i18n";
 import { css, fit, roundTopRect } from "./canvasUtil";
 
 export const Y_MAX = 95;
@@ -22,6 +23,15 @@ export function gateAtX(x: number, plotW: number): number | null {
   return Math.min(GATES - 1, Math.floor((x / plotW) * GATES));
 }
 
+export const HIT_PX = 8;
+
+/** True when pointer y (plot-relative CSS px) is within tol of the threshold line and inside the plot. */
+export function hitThreshold(y: number, thresholdDb: number | undefined, plotH: number, tol = HIT_PX): boolean {
+  if (thresholdDb === undefined || !Number.isFinite(thresholdDb)) return false;
+  if (!(y >= 0 && y <= plotH)) return false;
+  return Math.abs(y - dbToY(thresholdDb, plotH)) <= tol;
+}
+
 export function createEnergyChart(
   canvas: HTMLCanvasElement,
   opts: { onDrag: (gate: number, db: number) => void },
@@ -40,9 +50,12 @@ export function createEnergyChart(
   canvas.style.cursor = "ns-resize";
   canvas.style.touchAction = "none";
   canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
     const p = local(e);
     const g = gateAtX(p.x, p.plotW);
     if (g === null) return;
+    const arr = last.series === "trigger" ? last.params?.triggerDb : last.params?.microDb;
+    if (!hitThreshold(p.y, arr?.[g], plotH)) return;
     drag = g;
     try { canvas.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     opts.onDrag(g, yToDb(p.y, plotH));
@@ -67,13 +80,18 @@ export function createEnergyChart(
     const energy = frame ? (series === "trigger" ? frame.motionDb : frame.microDb) : null;
     const sel = series === "trigger" ? params?.triggerDb : params?.microDb;
     const other = series === "trigger" ? params?.microDb : params?.triggerDb;
-    const selColor = css(series === "trigger" ? "--present" : "--micro");
-    const otherColor = css(series === "trigger" ? "--micro" : "--present");
+    const C = {
+      border: css("--border"), muted: css("--muted"), accent: css("--accent"), accentSoft: css("--accent-soft"),
+      sel: css(series === "trigger" ? "--present" : "--micro"),
+      other: css(series === "trigger" ? "--micro" : "--present"),
+    };
+    const selColor = C.sel;
+    const otherColor = C.other;
 
     x.font = "11px Inter, system-ui, sans-serif";
     x.lineWidth = 1;
-    x.strokeStyle = css("--border");
-    x.fillStyle = css("--muted");
+    x.strokeStyle = C.border;
+    x.fillStyle = C.muted;
     for (let v = 0; v <= Y_MAX; v += 20) {
       const y = P.t + dbToY(v, ih);
       x.beginPath(); x.moveTo(P.l, y); x.lineTo(w - P.r, y); x.stroke();
@@ -86,8 +104,8 @@ export function createEnergyChart(
       if (e !== undefined && Number.isFinite(e)) {
         const top = P.t + dbToY(e, ih);
         const g = x.createLinearGradient(0, top, 0, P.t + ih);
-        g.addColorStop(0, css("--accent"));
-        g.addColorStop(1, css("--accent-soft"));
+        g.addColorStop(0, C.accent);
+        g.addColorStop(1, C.accentSoft);
         x.fillStyle = g;
         roundTopRect(x, X + bw * 0.18, top, bw * 0.64, P.t + ih - top, 5);
       }
@@ -104,8 +122,8 @@ export function createEnergyChart(
       line(other?.[i], otherColor, 0.35, 2.5);
       line(sel?.[i], selColor, 1, 2.5);
       x.globalAlpha = 1;
-      x.fillStyle = css("--muted");
-      x.fillText((i * 0.7).toFixed(1), X + bw * 0.28, h - 6);
+      x.fillStyle = C.muted;
+      x.fillText(formatNumber(i * 0.7, 1), X + bw * 0.28, h - 6);
     }
     x.lineWidth = 1;
   }

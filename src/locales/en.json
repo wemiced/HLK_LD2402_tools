@@ -101,5 +101,7 @@
   "errors.config.unsupportedVersion": "Unsupported configuration version {version}.",
   "errors.config.outOfRange": "Value out of range for {field}.",
   "status.preview": "Preview with unsaved thresholds: {state}",
-  "status.waiting": "Waiting for data…"
+  "status.waiting": "Waiting for data…",
+  "units.m": "m",
+  "units.s": "s"
 }

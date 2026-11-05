@@ -15,6 +15,7 @@ const h = vi.hoisted(() => {
     frameCb: null as null | ((f: unknown) => void),
     readParams: vi.fn(),
     setStreaming: vi.fn(),
+    toast: vi.fn(),
   };
 });
 
@@ -27,6 +28,8 @@ vi.mock("../api", () => ({
     return () => {};
   }),
 }));
+
+vi.mock("./notify", () => ({ toast: h.toast, showBanner: vi.fn(), hideBanner: vi.fn() }));
 
 import { setLocale } from "../i18n";
 import { app } from "../state/store";
@@ -87,4 +90,31 @@ it("connects, loads params, streams, and shows the live state and preview", asyn
   expect(app.get().lastFrame).toBeNull();
   expect(app.get().streaming).toBe(false);
   expect(app.get().draft).not.toBeNull();
+});
+
+it("disconnect while readParams is pending: no streaming, no toast", async () => {
+  h.toast.mockReset();
+  let resolve!: (p: unknown) => void;
+  h.readParams.mockReset().mockReturnValue(new Promise((r) => (resolve = r)));
+  app.set({ connection: "connected" });
+  await wait();
+  app.set({ connection: "disconnected" });
+  resolve(params);
+  await wait();
+  expect(h.setStreaming).not.toHaveBeenCalled();
+  expect(h.toast).not.toHaveBeenCalled();
+  expect(app.get().streaming).toBe(false);
+});
+
+it("Pause resolving after disconnect leaves streaming false", async () => {
+  app.set({ connection: "connected" });
+  await wait();
+  expect(app.get().streaming).toBe(true);
+  let resolve!: () => void;
+  h.setStreaming.mockReset().mockReturnValue(new Promise<void>((r) => (resolve = r)));
+  el.querySelector<HTMLButtonElement>('[data-role="pause"]')!.click();
+  app.set({ connection: "disconnected", streaming: false });
+  resolve();
+  await wait();
+  expect(app.get().streaming).toBe(false);
 });

@@ -1,3 +1,4 @@
+import { formatNumber, t } from "../i18n";
 import { css, fit } from "./canvasUtil";
 
 export interface Sample { t: number; d: number }
@@ -14,6 +15,7 @@ export function pruneWindow(samples: Sample[], now: number, windowMs = WINDOW_MS
 export function createDistanceChart(canvas: HTMLCanvasElement): {
   push(t: number, distanceM: number | null): void;
   render(): void;
+  reset(): void;
 } {
   let samples: Sample[] = [];
   let now = 0;
@@ -26,12 +28,13 @@ export function createDistanceChart(canvas: HTMLCanvasElement): {
     const ih = h - P.t - P.b;
     x.font = "11px Inter, system-ui, sans-serif";
     x.lineWidth = 1;
-    x.strokeStyle = css("--border");
-    x.fillStyle = css("--muted");
+    const C = { border: css("--border"), muted: css("--muted"), accent: css("--accent"), soft: css("--accent-soft") };
+    x.strokeStyle = C.border;
+    x.fillStyle = C.muted;
     for (let v = 0; v <= D_MAX; v += 2.5) {
       const y = P.t + ih - (v / D_MAX) * ih;
       x.beginPath(); x.moveTo(P.l, y); x.lineTo(w - P.r, y); x.stroke();
-      x.fillText(v + "m", 2, y + 4);
+      x.fillText(formatNumber(v, v % 1 ? 1 : 0) + t("units.m"), 2, y + 4);
     }
     const pts = samples.filter((s) => Number.isFinite(s.d));
     if (!pts.length) return;
@@ -48,14 +51,14 @@ export function createDistanceChart(canvas: HTMLCanvasElement): {
     for (const run of runs) {
       x.beginPath();
       run.forEach((s, i) => (i ? x.lineTo(X(s.t), Y(s.d)) : x.moveTo(X(s.t), Y(s.d))));
-      x.strokeStyle = css("--accent");
+      x.strokeStyle = C.accent;
       x.lineWidth = 2;
       x.lineJoin = "round";
       x.stroke();
       x.lineTo(X(run[run.length - 1].t), P.t + ih);
       x.lineTo(X(run[0].t), P.t + ih);
       x.closePath();
-      x.fillStyle = css("--accent-soft");
+      x.fillStyle = C.soft;
       x.fill();
     }
     x.lineWidth = 1;
@@ -68,5 +71,9 @@ export function createDistanceChart(canvas: HTMLCanvasElement): {
       samples = pruneWindow(samples, now);
     },
     render,
+    reset() {
+      samples = [];
+      now = 0;
+    },
   };
 }

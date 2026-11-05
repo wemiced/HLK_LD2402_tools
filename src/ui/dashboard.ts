@@ -107,10 +107,10 @@ export function mountDashboard(el: HTMLElement): void {
       since.textContent = "—";
     } else {
       label.textContent = present ? t("status.present") : t("status.nobody");
-      dist.textContent = present ? `${formatNumber(f.distanceM, 2)} m` : "—";
+      dist.textContent = present ? `${formatNumber(f.distanceM, 2)} ${t("units.m")}` : "—";
       state.textContent = t(STATE_KEY[f.presence]);
       const ref = lastPresentAt ?? firstFrameAt;
-      since.textContent = present || ref === null ? "—" : `${Math.max(0, Math.floor((Date.now() - ref) / 1000))} s`;
+      since.textContent = present || ref === null ? "—" : `${Math.max(0, Math.floor((Date.now() - ref) / 1000))} ${t("units.s")}`;
     }
     const p = s.draft ?? s.sensor;
     const showPreview = connected && !!f && !!p && isDirty(s.sensor, s.draft);
@@ -123,13 +123,18 @@ export function mountDashboard(el: HTMLElement): void {
   }
 
   // --- events
+  // bumped on every connect/disconnect so stale async work can bail out
+  let epoch = 0;
+  const live = (e: number) => e === epoch && app.get().connection === "connected";
+
   pause.addEventListener("click", async () => {
+    const ep = epoch;
     const next = !app.get().streaming;
     try {
       await setStreaming(next);
-      app.set({ streaming: next });
+      if (live(ep)) app.set({ streaming: next });
     } catch (e) {
-      toast("error", errText(e));
+      if (live(ep)) toast("error", errText(e));
     }
   });
 
@@ -151,18 +156,22 @@ export function mountDashboard(el: HTMLElement): void {
   });
 
   onConnected(async () => {
+    const ep = ++epoch;
     lastPresentAt = null;
     firstFrameAt = null;
     try {
       const params = await readParams();
+      if (!live(ep)) return;
       app.set({ sensor: params, draft: params });
       await setStreaming(true);
-      app.set({ streaming: true });
+      if (live(ep)) app.set({ streaming: true });
     } catch (e) {
-      toast("error", errText(e));
+      if (live(ep)) toast("error", errText(e));
     }
   });
   onDisconnect(() => {
+    epoch++;
+    line.reset();
     lastPresentAt = null;
     firstFrameAt = null;
     app.set({ lastFrame: null, streaming: false });

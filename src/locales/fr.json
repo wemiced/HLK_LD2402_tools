@@ -101,5 +101,7 @@
   "errors.config.unsupportedVersion": "Version de configuration {version} non prise en charge.",
   "errors.config.outOfRange": "Valeur hors limites pour {field}.",
   "status.preview": "Aperçu avec les seuils non écrits : {state}",
-  "status.waiting": "En attente de données…"
+  "status.waiting": "En attente de données…",
+  "units.m": "m",
+  "units.s": "s"
 }
