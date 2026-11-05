@@ -19,8 +19,9 @@ const ACK_TIMEOUT: Duration = Duration::from_millis(500);
 const ACK_ATTEMPTS: u32 = 2;
 const CLEANUP_TIMEOUT: Duration = Duration::from_millis(300);
 const CALIB_POLL: Duration = Duration::from_millis(500);
-/// How long an unanswered attempt's ACK is still expected (and discarded).
-const STALE_WINDOW: Duration = Duration::from_millis(1000);
+/// Pause after a retried or timed-out request: late ACKs of its word are
+/// discarded and no new request is started, so none can be mistaken.
+const DRAIN_WINDOW: Duration = Duration::from_millis(150);
 /// Extra caller-side margin over the worker's own ACK deadline.
 const REPLY_MARGIN: Duration = Duration::from_millis(500);
 const DEFAULT_BUFFER: u16 = 0x20;
@@ -201,28 +202,10 @@ struct Pending {
     sent: u32,
 }
 
-/// ACKs still owed for attempts that timed out; the next matching one is
-/// discarded so it cannot satisfy a later request with the same word.
-#[derive(Default)]
-struct Stale(Vec<(u16, Instant)>);
-
-impl Stale {
-    fn add(&mut self, word: u16, n: u32) {
-        let until = Instant::now() + STALE_WINDOW;
-        self.0.extend((0..n).map(|_| (word, until)));
-    }
-    /// True (and forgets one entry) when an ACK of `word` is still owed.
-    fn take(&mut self, word: u16) -> bool {
-        let now = Instant::now();
-        self.0.retain(|(_, until)| *until > now);
-        match self.0.iter().position(|(w, _)| *w == word) {
-            Some(i) => {
-                self.0.remove(i);
-                true
-            }
-            None => false,
-        }
-    }
+/// Starts a drain after a request that was retried or timed out. Single-
+/// attempt requests (recovery/cleanup) skip it to keep their timing bounded.
+fn drain_after(p: &Pending) -> Option<(u16, Instant)> {
+    (p.req.attempts > 1 && p.sent > 1).then(|| (p.req.word, Instant::now() + DRAIN_WINDOW))
 }
 
 /// Owns the transport: sends requests one at a time, routes inbound frames.
@@ -235,7 +218,7 @@ fn worker_loop(
     let mut dec = FrameDecoder::new();
     let mut queue: VecDeque<Request> = VecDeque::new();
     let mut pending: Option<Pending> = None;
-    let mut stale = Stale::default();
+    let mut drain: Option<(u16, Instant)> = None;
     let mut buf = [0u8; 512];
     let reason = loop {
         loop {
@@ -246,7 +229,9 @@ fn worker_loop(
                 Err(TryRecvError::Empty) => break,
             }
         }
+        drain = drain.filter(|(_, until)| Instant::now() < *until);
         if pending.is_none()
+            && drain.is_none()
             && let Some(req) = queue.pop_front()
         {
             if let Err(e) = t.write_all(&req.frame) {
@@ -271,12 +256,12 @@ fn worker_loop(
                 }
                 Inbound::Cmd(f) => {
                     let word = f.word & !ACK_BIT;
-                    if f.word & ACK_BIT == 0 || stale.take(word) {
+                    if f.word & ACK_BIT == 0 || drain.is_some_and(|(w, _)| w == word) {
                         continue;
                     }
+                    // Any attempt's ACK answers the request; later ones drain.
                     if let Some(p) = pending.take_if(|p| word == p.req.word) {
-                        // Either attempt's ACK answers this request; the others are owed.
-                        stale.add(word, p.sent - 1);
+                        drain = drain_after(&p);
                         let _ = p.req.reply.send(Ok(f));
                     }
                 }
@@ -295,7 +280,7 @@ fn worker_loop(
                     break e.to_string();
                 }
             } else if let Some(p) = pending.take() {
-                stale.add(p.req.word, p.sent);
+                drain = drain_after(&p);
                 let _ = p
                     .req
                     .reply
@@ -569,344 +554,4 @@ impl Drop for Device {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sim::{SimHandle, SimOptions, SimSensor};
-    use std::sync::mpsc::{self, Receiver};
-    use std::time::{Duration, Instant};
-
-    fn try_open(
-        opts: SimOptions,
-    ) -> (
-        Result<Device, DeviceError>,
-        SimHandle,
-        Receiver<DeviceEvent>,
-    ) {
-        let sim = SimSensor::new(opts);
-        let h = sim.sim_handle();
-        let (tx, rx) = mpsc::channel();
-        let d = Device::open(
-            Box::new(sim),
-            Box::new(move |e| {
-                let _ = tx.send(e);
-            }),
-        );
-        (d, h, rx)
-    }
-
-    /// Sim wrapper whose filter decides which frames (by command word) reach the sim.
-    type Filter = Box<dyn FnMut(u16, &[u8]) -> Vec<Vec<u8>> + Send>;
-
-    struct Tamper {
-        inner: SimSensor,
-        filter: Filter,
-    }
-
-    impl Transport for Tamper {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            self.inner.read(buf)
-        }
-        fn write_all(&mut self, data: &[u8]) -> std::io::Result<()> {
-            let word = u16::from_le_bytes([data[6], data[7]]);
-            for f in (self.filter)(word, data) {
-                self.inner.write_all(&f)?;
-            }
-            Ok(())
-        }
-    }
-
-    fn try_open_tampered(
-        filter: Filter,
-    ) -> (
-        Result<Device, DeviceError>,
-        SimHandle,
-        Receiver<DeviceEvent>,
-    ) {
-        let inner = SimSensor::new(SimOptions::default());
-        let h = inner.sim_handle();
-        let (tx, rx) = mpsc::channel();
-        let d = Device::open(
-            Box::new(Tamper { inner, filter }),
-            Box::new(move |e| {
-                let _ = tx.send(e);
-            }),
-        );
-        (d, h, rx)
-    }
-
-    /// Drops every frame carrying `word`.
-    fn drop_word(word: u16) -> Filter {
-        Box::new(move |w, f| if w == word { vec![] } else { vec![f.to_vec()] })
-    }
-
-    fn open(opts: SimOptions) -> (Device, SimHandle, Receiver<DeviceEvent>) {
-        let (d, h, rx) = try_open(opts);
-        match d {
-            Ok(d) => (d, h, rx),
-            Err(e) => panic!("open failed: {e}"),
-        }
-    }
-
-    fn version(v: &str) -> SimOptions {
-        SimOptions {
-            version: v.into(),
-            ..Default::default()
-        }
-    }
-
-    fn coeffs() -> CalibCoefficients {
-        CalibCoefficients {
-            trigger: 3.0,
-            hold: 2.0,
-            micro: 3.0,
-        }
-    }
-
-    fn modified(h: &SimHandle) -> SensorParams {
-        let mut p = h.params();
-        p.max_distance_m = 7.5;
-        p.disappear_delay_s = 12;
-        p.trigger_db[3] = 55.0;
-        p.micro_db[15] = 21.0;
-        p
-    }
-
-    #[test]
-    fn device_is_send_and_sync() {
-        fn check<T: Send + Sync>() {}
-        check::<Device>();
-    }
-
-    #[test]
-    fn open_reads_info() {
-        let (d, h, _rx) = open(SimOptions::default());
-        let info = d.info();
-        assert_eq!(info.firmware, "v3.3.5");
-        assert!(info.capabilities.auto_gain);
-        assert_eq!(info.serial, "SIM-LD2402-0001");
-        assert_eq!(info.power, PowerStatus::NotTested);
-        assert!(!h.in_config());
-    }
-
-    #[test]
-    fn open_reads_hex_serial_on_old_firmware() {
-        let (d, _h, _rx) = open(version("v3.3.1"));
-        assert_eq!(d.info().serial, "4CD24002A17B0019");
-        assert!(!d.info().capabilities.serial_text);
-    }
-
-    #[test]
-    fn open_recovers_from_engineering_mode() {
-        let (d, h, _rx) = open(SimOptions {
-            start_in_engineering: true,
-            start_in_config: true,
-            ..Default::default()
-        });
-        assert_eq!(d.info().firmware, "v3.3.5");
-        assert!(!h.engineering() && !h.in_config());
-    }
-
-    #[test]
-    fn read_params_matches_sim_and_keeps_streaming() {
-        let (d, h, _rx) = open(SimOptions::default());
-        d.set_streaming(true).unwrap();
-        assert_eq!(d.read_params().unwrap(), h.params());
-        assert!(h.engineering() && !h.in_config());
-    }
-
-    #[test]
-    fn write_params_persists_and_saves() {
-        let (d, h, _rx) = open(SimOptions::default());
-        let p = modified(&h);
-        d.write_params(&p).unwrap();
-        assert_eq!(h.params(), p);
-        assert!(h.saved());
-        assert!(!h.in_config());
-    }
-
-    #[test]
-    fn write_params_without_save_capability() {
-        let (d, h, _rx) = open(version("v3.3.1"));
-        let p = modified(&h);
-        d.write_params(&p).unwrap();
-        assert_eq!(h.params(), p);
-        assert!(!h.saved());
-    }
-
-    #[test]
-    fn streaming_emits_frames_and_close_restores_normal() {
-        let (d, h, rx) = open(SimOptions::default());
-        d.set_streaming(true).unwrap();
-        assert!(h.engineering() && !h.in_config());
-        std::thread::sleep(Duration::from_millis(350));
-        let frames = rx
-            .try_iter()
-            .filter(|e| matches!(e, DeviceEvent::Frame(_)))
-            .count();
-        assert!(frames >= 2, "got {frames} frames");
-        d.close();
-        assert!(!h.engineering() && !h.in_config());
-    }
-
-    #[test]
-    fn drop_restores_normal_mode() {
-        let (d, h, _rx) = open(SimOptions::default());
-        d.set_streaming(true).unwrap();
-        assert!(h.engineering());
-        drop(d);
-        assert!(!h.engineering() && !h.in_config());
-    }
-
-    #[test]
-    fn calibration_reports_progress_and_gates() {
-        let (d, h, rx) = open(SimOptions::default());
-        d.start_calibration(coeffs()).unwrap();
-        let mut progress = vec![];
-        let end = Instant::now() + Duration::from_secs(10);
-        let gates = loop {
-            let left = end.saturating_duration_since(Instant::now());
-            match rx.recv_timeout(left).expect("CalibDone within 10 s") {
-                DeviceEvent::CalibProgress(p) => progress.push(p),
-                DeviceEvent::CalibDone { gates } => break gates,
-                _ => {}
-            }
-        };
-        assert!(progress.windows(2).all(|w| w[0] < w[1]), "{progress:?}");
-        assert_eq!(progress.last(), Some(&100));
-        assert_eq!(gates, vec![1, 10, 15]);
-        assert!(!h.in_config());
-        assert_eq!(d.read_params(), Ok(h.params()));
-    }
-
-    #[test]
-    fn calibration_failure_emits_event_and_clears_busy() {
-        let (d, h, rx) = try_open_tampered(drop_word(CMD_CALIB_PROGRESS));
-        let d = d.unwrap_or_else(|e| panic!("open failed: {e}"));
-        d.start_calibration(coeffs()).unwrap();
-        let end = Instant::now() + Duration::from_secs(5);
-        let error = loop {
-            let left = end.saturating_duration_since(Instant::now());
-            match rx.recv_timeout(left).expect("CalibFailed within 5 s") {
-                DeviceEvent::CalibFailed { error } => break error,
-                DeviceEvent::CalibDone { .. } => panic!("unexpected CalibDone"),
-                _ => {}
-            }
-        };
-        assert_eq!(
-            error,
-            DeviceError::Timeout {
-                word: CMD_CALIB_PROGRESS
-            }
-        );
-        assert!(!h.in_config());
-        assert_eq!(d.read_params(), Ok(h.params()));
-    }
-
-    #[test]
-    fn failed_open_leaves_config_mode() {
-        let (d, h, _rx) = try_open_tampered(drop_word(CMD_READ_SN_TEXT));
-        assert_eq!(
-            d.err(),
-            Some(DeviceError::Timeout {
-                word: CMD_READ_SN_TEXT
-            })
-        );
-        assert!(!h.in_config() && !h.engineering());
-    }
-
-    #[test]
-    fn late_ack_after_retry_is_not_taken_by_next_chunk() {
-        // 0x0008 writes: #1 is open's power read; #2 (chunk 1) is held until
-        // #4 (chunk 2), so chunk 1's late ACK lands while chunk 2 is pending.
-        let mut n = 0;
-        let mut held = None;
-        let filter: Filter = Box::new(move |w, f| {
-            if w != CMD_READ_PARAMS {
-                return vec![f.to_vec()];
-            }
-            n += 1;
-            match n {
-                2 => {
-                    held = Some(f.to_vec());
-                    vec![]
-                }
-                4 => held.take().into_iter().chain([f.to_vec()]).collect(),
-                _ => vec![f.to_vec()],
-            }
-        });
-        let (d, h, _rx) = try_open_tampered(filter);
-        let d = d.unwrap_or_else(|e| panic!("open failed: {e}"));
-        assert_eq!(d.read_params(), Ok(h.params()));
-    }
-
-    #[test]
-    fn busy_during_calibration() {
-        let (d, h, _rx) = open(SimOptions::default());
-        let p = h.params();
-        d.start_calibration(coeffs()).unwrap();
-        assert_eq!(d.read_params(), Err(DeviceError::Busy));
-        assert_eq!(d.write_params(&p), Err(DeviceError::Busy));
-        assert_eq!(d.set_streaming(true), Err(DeviceError::Busy));
-        assert_eq!(d.auto_gain(), Err(DeviceError::Busy));
-        assert_eq!(d.start_calibration(coeffs()), Err(DeviceError::Busy));
-        assert_eq!(d.info().firmware, "v3.3.5");
-        d.close();
-        assert!(!h.in_config() && !h.engineering());
-    }
-
-    #[test]
-    fn auto_gain_unsupported_on_old_firmware() {
-        let (d, _h, _rx) = open(version("v3.3.1"));
-        assert_eq!(
-            d.auto_gain(),
-            Err(DeviceError::Unsupported {
-                feature: "autoGain".into(),
-                required: "3.3.5".into()
-            })
-        );
-    }
-
-    #[test]
-    fn auto_gain_emits_done_event() {
-        let (d, h, rx) = open(SimOptions::default());
-        d.auto_gain().unwrap();
-        let done = std::iter::from_fn(|| rx.recv_timeout(Duration::from_secs(1)).ok())
-            .any(|e| matches!(e, DeviceEvent::AutoGainDone));
-        assert!(done, "no AutoGainDone event");
-        assert!(!h.in_config());
-    }
-
-    #[test]
-    fn unresponsive_open_times_out() {
-        let start = Instant::now();
-        let (d, _h, _rx) = try_open(SimOptions {
-            unresponsive: true,
-            ..Default::default()
-        });
-        assert_eq!(d.err(), Some(DeviceError::Timeout { word: 0x0000 }));
-        assert!(
-            start.elapsed() < Duration::from_millis(2500),
-            "{:?}",
-            start.elapsed()
-        );
-    }
-
-    #[test]
-    fn transport_error_emits_disconnected() {
-        let (d, _h, rx) = open(SimOptions {
-            fail_after_reads: Some(20),
-            ..Default::default()
-        });
-        let end = Instant::now() + Duration::from_secs(1);
-        let got = loop {
-            let left = end.saturating_duration_since(Instant::now());
-            match rx.recv_timeout(left) {
-                Ok(DeviceEvent::Disconnected { .. }) => break true,
-                Ok(_) => {}
-                Err(_) => break false,
-            }
-        };
-        assert!(got, "no Disconnected event within 1 s");
-        assert_eq!(d.read_params(), Err(DeviceError::Disconnected));
-    }
-}
+mod tests;
