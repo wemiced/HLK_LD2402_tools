@@ -144,6 +144,5 @@ section[data-view="calibration"] .card{align-self:start}
 .callout.warn{background:rgba(255,180,84,.12);border-color:var(--micro)}
 .callout ul.clamped{margin:8px 0 0;padding-left:18px;font-size:12px}
 .callout ul.clamped li{margin:2px 0}
-.card .row.head{flex-wrap:nowrap;gap:6px}
-.card .row.head h3{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.card .row.head .btn{white-space:nowrap;flex:none}
+.actions{grid-template-columns:repeat(auto-fit,minmax(128px,1fr))}
+.actions .btn{justify-content:center;white-space:nowrap}

@@ -12,8 +12,7 @@ import { confirmDiscardIfDirty, currentEpoch, guarded, isLive, performWrite } fr
 
 const TEMPLATE = `
 <div class="card">
-  <div class="row head"><h3 data-i18n="params.title"></h3><div class="grow"></div>
-    <button class="btn ghost sm" data-role="restore" data-i18n="params.restore"></button>
+  <div class="row"><h3 data-i18n="params.title"></h3><div class="grow"></div>
     <button class="btn ghost sm" data-role="reload">↻ <span data-i18n="params.reread"></span></button></div>
   <div class="field">
     <div class="top"><label for="p-dist" data-i18n="params.maxDistance"></label><span class="val" data-role="distVal"></span></div>
@@ -35,6 +34,7 @@ const TEMPLATE = `
   <div class="actions">
     <button class="btn" data-role="export" data-i18n="params.export"></button>
     <button class="btn" data-role="import" data-i18n="params.import"></button>
+    <button class="btn" data-role="restore" data-i18n="params.restore"></button>
   </div>
 </div>`;
 
