@@ -1,4 +1,7 @@
+pub mod device;
 pub mod protocol;
+pub mod sim;
+pub mod transport;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]

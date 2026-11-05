@@ -46,6 +46,7 @@ pub fn parse_version(s: &str) -> Option<FwVersion> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Capabilities {
     pub permanent_save: bool,
     pub auto_gain: bool,
