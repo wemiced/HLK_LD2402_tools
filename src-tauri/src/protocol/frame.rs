@@ -64,7 +64,11 @@ fn parse_text(line: &[u8]) -> Option<TextReport> {
     if s == "OFF" {
         return Some(TextReport::Off);
     }
-    s.strip_prefix("distance:")?.trim().parse().ok().map(TextReport::Distance)
+    s.strip_prefix("distance:")?
+        .trim()
+        .parse()
+        .ok()
+        .map(TextReport::Distance)
 }
 
 enum Step {
@@ -81,10 +85,13 @@ impl FrameDecoder {
         self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
         loop {
-            let header = [(find(&self.buf, &CMD_HEADER), true), (find(&self.buf, &ENG_HEADER), false)]
-                .into_iter()
-                .filter_map(|(p, is_cmd)| p.map(|p| (p, is_cmd)))
-                .min_by_key(|(p, _)| *p);
+            let header = [
+                (find(&self.buf, &CMD_HEADER), true),
+                (find(&self.buf, &ENG_HEADER), false),
+            ]
+            .into_iter()
+            .filter_map(|(p, is_cmd)| p.map(|p| (p, is_cmd)))
+            .min_by_key(|(p, _)| *p);
             let newline = self.buf.iter().position(|&b| b == b'\n');
 
             match (header, newline) {
@@ -92,7 +99,11 @@ impl FrameDecoder {
                 (None, Some(n)) => self.take_text(n, &mut out),
                 (Some((h, is_cmd)), _) => {
                     self.buf.drain(..h);
-                    let step = if is_cmd { self.try_cmd() } else { self.try_eng() };
+                    let step = if is_cmd {
+                        self.try_cmd()
+                    } else {
+                        self.try_eng()
+                    };
                     match step {
                         Step::NeedMore => break,
                         Step::Frame(consumed, item) => {
@@ -135,7 +146,10 @@ impl FrameDecoder {
         if b[6 + len..total] != CMD_TAIL {
             return Step::Frame(1, None);
         }
-        let frame = CmdFrame { word: u16::from_le_bytes([b[6], b[7]]), payload: b[8..6 + len].to_vec() };
+        let frame = CmdFrame {
+            word: u16::from_le_bytes([b[6], b[7]]),
+            payload: b[8..6 + len].to_vec(),
+        };
         Step::Frame(total, Some(Inbound::Cmd(frame)))
     }
 
@@ -160,7 +174,11 @@ impl FrameDecoder {
             let o = 9 + i * 4;
             *e = u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
         }
-        let frame = RawEngineering { presence: b[6], distance_cm: u16::from_le_bytes([b[7], b[8]]), energy };
+        let frame = RawEngineering {
+            presence: b[6],
+            distance_cm: u16::from_le_bytes([b[7], b[8]]),
+            energy,
+        };
         Step::Frame(total, Some(Inbound::Engineering(frame)))
     }
 }
@@ -174,7 +192,10 @@ mod tests {
 
     #[test]
     fn encode_read_version() {
-        assert_eq!(encode_command(0x0000, &[]), hex("FD FC FB FA 02 00 00 00 04 03 02 01"));
+        assert_eq!(
+            encode_command(0x0000, &[]),
+            hex("FD FC FB FA 02 00 00 00 04 03 02 01")
+        );
     }
     #[test]
     fn encode_enable_config() {
@@ -185,21 +206,46 @@ mod tests {
     }
     #[test]
     fn decode_enable_config_ack() {
-        let out = FrameDecoder::new().push(&hex("FD FC FB FA 08 00 FF 01 00 00 02 00 20 00 04 03 02 01"));
-        assert_eq!(out, vec![Inbound::Cmd(CmdFrame { word: 0x01FF, payload: hex("00 00 02 00 20 00") })]);
+        let out = FrameDecoder::new().push(&hex(
+            "FD FC FB FA 08 00 FF 01 00 00 02 00 20 00 04 03 02 01",
+        ));
+        assert_eq!(
+            out,
+            vec![Inbound::Cmd(CmdFrame {
+                word: 0x01FF,
+                payload: hex("00 00 02 00 20 00")
+            })]
+        );
     }
     #[test]
     fn decode_manual_engineering_sample() {
         assert_eq!(hex(MANUAL_ENG_SAMPLE).len(), 141);
         let out = FrameDecoder::new().push(&hex(MANUAL_ENG_SAMPLE));
         assert_eq!(out.len(), 1);
-        let Inbound::Engineering(f) = &out[0] else { panic!() };
-        assert_eq!((f.presence, f.distance_cm, f.energy[0], f.energy[16], f.energy[31]), (1, 102, 4598, 206769, 1091));
+        let Inbound::Engineering(f) = &out[0] else {
+            panic!()
+        };
+        assert_eq!(
+            (
+                f.presence,
+                f.distance_cm,
+                f.energy[0],
+                f.energy[16],
+                f.energy[31]
+            ),
+            (1, 102, 4598, 206769, 1091)
+        );
     }
     #[test]
     fn decode_text_lines() {
         let out = FrameDecoder::new().push(b"OFF\r\ndistance:102\r\n");
-        assert_eq!(out, vec![Inbound::Text(TextReport::Off), Inbound::Text(TextReport::Distance(102))]);
+        assert_eq!(
+            out,
+            vec![
+                Inbound::Text(TextReport::Off),
+                Inbound::Text(TextReport::Distance(102))
+            ]
+        );
     }
     #[test]
     fn unknown_text_line_dropped() {
@@ -219,18 +265,33 @@ mod tests {
         let ack = hex("FD FC FB FA 04 00 FE 01 00 00 04 03 02 01");
         bytes.extend_from_slice(&ack);
         let out = FrameDecoder::new().push(&bytes);
-        assert_eq!(out, vec![Inbound::Cmd(CmdFrame { word: 0x01FE, payload: hex("00 00") })]);
+        assert_eq!(
+            out,
+            vec![Inbound::Cmd(CmdFrame {
+                word: 0x01FE,
+                payload: hex("00 00")
+            })]
+        );
     }
     #[test]
     fn bad_tail_drops_one_byte_and_rescans() {
         let mut bytes = hex("FD FC FB FA 02 00 00 00 04 03 02 99");
         bytes.extend_from_slice(&hex("FD FC FB FA 02 00 00 01 04 03 02 01"));
         let out = FrameDecoder::new().push(&bytes);
-        assert_eq!(out, vec![Inbound::Cmd(CmdFrame { word: 0x0100, payload: vec![] })]);
+        assert_eq!(
+            out,
+            vec![Inbound::Cmd(CmdFrame {
+                word: 0x0100,
+                payload: vec![]
+            })]
+        );
     }
     const ACK: &str = "FD FC FB FA 04 00 FE 01 00 00 04 03 02 01";
     fn ack_item() -> Inbound {
-        Inbound::Cmd(CmdFrame { word: 0x01FE, payload: hex("00 00") })
+        Inbound::Cmd(CmdFrame {
+            word: 0x01FE,
+            payload: hex("00 00"),
+        })
     }
 
     #[test]
@@ -239,7 +300,10 @@ mod tests {
         bytes.extend_from_slice(b"OFF\r\n");
         bytes.extend_from_slice(&hex(ACK));
         let out = FrameDecoder::new().push(&bytes);
-        assert_eq!(out, vec![ack_item(), Inbound::Text(TextReport::Off), ack_item()]);
+        assert_eq!(
+            out,
+            vec![ack_item(), Inbound::Text(TextReport::Off), ack_item()]
+        );
     }
     #[test]
     fn text_before_and_after_frame_in_one_push() {
@@ -247,7 +311,14 @@ mod tests {
         bytes.extend_from_slice(&hex(ACK));
         bytes.extend_from_slice(b"OFF\r\n");
         let out = FrameDecoder::new().push(&bytes);
-        assert_eq!(out, vec![Inbound::Text(TextReport::Distance(5)), ack_item(), Inbound::Text(TextReport::Off)]);
+        assert_eq!(
+            out,
+            vec![
+                Inbound::Text(TextReport::Distance(5)),
+                ack_item(),
+                Inbound::Text(TextReport::Off)
+            ]
+        );
     }
     #[test]
     fn garbage_with_newline_before_frame() {
@@ -284,7 +355,9 @@ mod tests {
     fn fuzz_never_panics() {
         let mut state: u64 = 0x1234_5678_9ABC_DEF0;
         let mut next = move || {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (state >> 33) as u32
         };
         // Pure random chunks: must never panic.
