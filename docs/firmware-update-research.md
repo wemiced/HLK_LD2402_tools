@@ -1,6 +1,6 @@
 # HLK-LD2402 firmware update protocol: research notes
 
-Date: 2026-11-05. Time-boxed: 4 web searches, no fetched binaries, nothing executed. Web content treated as untrusted.
+Date: 2026-11-05. Time-boxed: a handful of web searches, no fetched binaries, nothing executed. Web content treated as untrusted.
 
 ## Question
 Is the LD2402 firmware update (OTA / bootloader) protocol publicly documented, so the app could implement it?
@@ -18,12 +18,12 @@ Is the LD2402 firmware update (OTA / bootloader) protocol publicly documented, s
 - No public document, repository or forum post describes the LD2402 update protocol (framing, bootloader entry, image format, checksums).
 - The manual only describes the vendor Windows tool's UI. It notes a "Get Firmware Information" step is mandatory before download, implying a handshake/ID check we cannot reproduce.
 - Related Hi-Link modules use separate, undocumented upgrade paths (Bluetooth for LD2450); nothing transfers to the LD2402.
-- Community evidence shows updates can leave sensors unresponsive, so guessing is unsafe.
+- One forum report (LD2450, a different model) describes a sensor left unresponsive after an update. This is a single anecdote, not evidence about the LD2402, but it is a reason to avoid untested flashing code.
 
 ## Conclusion
 The protocol is not publicly available. No flashing code is implemented. The Firmware page ships in an "unavailable" state (current version and feature table only; Update disabled).
 
 ## Next steps if pursued
-1. Ask Hi-Link support/sales for the protocol document and a sample .bin (they reportedly share serial protocol docs on request).
+1. Ask Hi-Link support/sales for the protocol document and a sample .bin (no source confirms they provide it).
 2. Otherwise capture the vendor tool's serial traffic on Windows (virtual COM pair / USB analyser) during an update on a sacrificial module.
 3. Write a separate spec and plan, reviewed by the user, covering recovery behaviour, image validation and a dry-run mode before any write code.
