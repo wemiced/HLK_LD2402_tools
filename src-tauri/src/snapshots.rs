@@ -4,7 +4,9 @@
 use crate::config_file::{ClampedField, from_json_lenient, rfc3339_utc, snapshot_json};
 use crate::protocol::commands::SensorParams;
 use serde::Serialize;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_BACKUPS: usize = 10;
@@ -85,13 +87,40 @@ fn compact_ts(secs: u64) -> String {
     rfc3339_utc(secs).replace(['-', ':'], "")
 }
 
-fn write_atomic(path: &Path, content: &str) -> Result<(), String> {
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, content).map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Write `content` to a unique tmp file (synced), then publish it at `path`
+/// with a hard link, which fails instead of replacing an existing file.
+/// Returns Ok(false) when `path` already exists (left untouched).
+fn publish_new(path: &Path, content: &str) -> Result<bool, String> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let unique = format!(
+        "{}.{}.{nanos}.{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("snap"),
+        std::process::id(),
+        TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+    );
+    let tmp = path.with_file_name(unique);
+    let werr = |p: &Path, e: std::io::Error| format!("cannot write {}: {e}", p.display());
+    let write = || -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(content.as_bytes())?;
+        f.sync_all()
+    };
+    if let Err(e) = write() {
         let _ = std::fs::remove_file(&tmp);
-        format!("cannot write {}: {e}", path.display())
-    })
+        return Err(werr(&tmp, e));
+    }
+    let res = std::fs::hard_link(&tmp, path);
+    let _ = std::fs::remove_file(&tmp);
+    match res {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(werr(path, e)),
+    }
 }
 
 fn saved_at_of(path: &Path) -> Option<String> {
@@ -155,11 +184,7 @@ impl SnapshotStore {
     ) -> Result<bool, String> {
         let dir = self.ensure_dir(serial)?;
         let path = dir.join(ORIGINAL);
-        if path.exists() {
-            return Ok(false);
-        }
-        write_atomic(&path, &snapshot_json(p, fw, serial, "original"))?;
-        Ok(true)
+        publish_new(&path, &snapshot_json(p, fw, serial, "original"))
     }
 
     pub fn save_backup(
@@ -171,18 +196,43 @@ impl SnapshotStore {
         let dir = self.ensure_dir(serial)?;
         let now = secs_of(SystemTime::now());
         let existing = self.backups(serial);
-        let n = existing
+        let mut n = existing
             .iter()
             .filter(|(s, _, _)| *s == now)
             .map(|(_, n, _)| n + 1)
             .max()
             .unwrap_or(0);
-        let file = format!("backup-{}-{n}.json", compact_ts(now));
-        write_atomic(&dir.join(&file), &snapshot_json(p, fw, serial, "backup"))?;
-        // Prune: keep the newest MAX_BACKUPS (including the one just written).
-        let all = self.backups(serial);
-        for (_, _, name) in all.iter().take(all.len().saturating_sub(MAX_BACKUPS)) {
+        let content = snapshot_json(p, fw, serial, "backup");
+        let file = loop {
+            let file = format!("backup-{}-{n}.json", compact_ts(now));
+            if publish_new(&dir.join(&file), &content)? {
+                break file;
+            }
+            n += 1;
+            if n > 10_000 {
+                return Err(format!(
+                    "cannot find a free backup name in {}",
+                    dir.display()
+                ));
+            }
+        };
+        // Prune the oldest others; never the file just written.
+        let others: Vec<_> = self
+            .backups(serial)
+            .into_iter()
+            .filter(|(_, _, name)| *name != file)
+            .collect();
+        for (_, _, name) in others
+            .iter()
+            .take(others.len().saturating_sub(MAX_BACKUPS - 1))
+        {
             let _ = std::fs::remove_file(dir.join(name));
+        }
+        if !dir.join(&file).is_file() {
+            return Err(format!(
+                "backup {} disappeared after saving",
+                dir.join(&file).display()
+            ));
         }
         Ok(self.meta_of(serial, SnapshotKind::Backup, file, now))
     }
@@ -212,7 +262,7 @@ impl SnapshotStore {
         serial: &str,
         meta: &SnapshotMeta,
     ) -> Result<(SensorParams, Vec<ClampedField>), String> {
-        if meta.file.contains(['/', '\\']) || meta.file.contains("..") {
+        if meta.file != ORIGINAL && parse_backup_name(&meta.file).is_none() {
             return Err(format!("invalid snapshot file name: {}", meta.file));
         }
         let path = self.dir(serial).join(&meta.file);
@@ -322,5 +372,101 @@ mod tests {
             st.save_original_if_absent("SN1", "fw", &params(3.0))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn existing_original_survives_publish() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = SnapshotStore::new(dir.path().to_path_buf());
+        st.save_original_if_absent("SN1", "fw", &params(3.0))
+            .unwrap();
+        let path = dir.path().join("SN1").join("original.json");
+        let before = std::fs::read_to_string(&path).unwrap();
+        // Simulates a concurrent writer that got there first.
+        assert_eq!(publish_new(&path, "other"), Ok(false));
+        assert_eq!(
+            st.save_original_if_absent("SN1", "fw", &params(9.0)),
+            Ok(false)
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+        let names: Vec<_> = std::fs::read_dir(dir.path().join("SN1"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(names, vec!["original.json".to_string()]);
+    }
+
+    #[test]
+    fn future_named_backups_do_not_prune_new_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = SnapshotStore::new(dir.path().to_path_buf());
+        let sd = dir.path().join("SN1");
+        std::fs::create_dir_all(&sd).unwrap();
+        for n in 0..10 {
+            std::fs::write(sd.join(format!("backup-29990101T000000Z-{n}.json")), "{}").unwrap();
+        }
+        let meta = st.save_backup("SN1", "fw", &params(3.0)).unwrap();
+        assert!(sd.join(&meta.file).is_file());
+        assert_eq!(st.load("SN1", &meta).unwrap().0, params(3.0));
+        let n = std::fs::read_dir(&sd).unwrap().count();
+        assert_eq!(n, 10);
+    }
+
+    #[test]
+    fn foreign_files_ignored_and_original_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = SnapshotStore::new(dir.path().to_path_buf());
+        st.save_original_if_absent("SN1", "fw", &params(2.0))
+            .unwrap();
+        let sd = dir.path().join("SN1");
+        for f in [
+            "notes.txt",
+            "backup-garbage.json",
+            "backup-x-1.json",
+            "backup-20200101T000000Z-q.json",
+        ] {
+            std::fs::write(sd.join(f), "junk").unwrap();
+        }
+        for _ in 0..12 {
+            st.save_backup("SN1", "fw", &params(3.0)).unwrap();
+        }
+        for f in [
+            "notes.txt",
+            "backup-garbage.json",
+            "backup-x-1.json",
+            "backup-20200101T000000Z-q.json",
+            "original.json",
+        ] {
+            assert!(sd.join(f).is_file(), "{f} missing");
+        }
+    }
+
+    #[test]
+    fn load_rejects_bad_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = SnapshotStore::new(dir.path().to_path_buf());
+        for f in ["../x", "other.json", "notes.txt"] {
+            let meta = SnapshotMeta {
+                kind: SnapshotKind::Backup,
+                saved_at: String::new(),
+                file: f.into(),
+            };
+            assert!(st.load("SN1", &meta).is_err(), "{f}");
+        }
+    }
+
+    #[test]
+    fn not_before_boundary_is_inclusive() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = SnapshotStore::new(dir.path().to_path_buf());
+        let sd = dir.path().join("SN1");
+        std::fs::create_dir_all(&sd).unwrap();
+        std::fs::write(sd.join("backup-20240101T000010Z-0.json"), "{}").unwrap();
+        let at = |s: u64| UNIX_EPOCH + std::time::Duration::from_secs(s);
+        let t = parse_backup_name("backup-20240101T000010Z-0.json")
+            .unwrap()
+            .0;
+        assert!(st.latest_backup("SN1", Some(at(t))).is_some());
+        assert!(st.latest_backup("SN1", Some(at(t + 1))).is_none());
     }
 }

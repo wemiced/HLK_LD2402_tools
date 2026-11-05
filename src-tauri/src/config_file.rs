@@ -457,4 +457,13 @@ mod tests {
         g["disappearDelayS"] = json!(1.5);
         assert_eq!(from_json_lenient(&doc(g)), Err(oor("disappearDelayS")));
     }
+
+    #[test]
+    fn lenient_rejects_unsupported_version() {
+        let s = json!({"format":"ld2402-studio-config","version":2,"params":good()}).to_string();
+        assert_eq!(
+            from_json_lenient(&s),
+            Err(ConfigError::UnsupportedVersion { version: 2 })
+        );
+    }
 }
