@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { exportConfig, importConfig, readParams, writeParams } from "../api";
 import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
 import { clampParams, isDirty } from "../state/draft";
-import { app, canEdit, onConnected, onDisconnect } from "../state/store";
+import { app, canEdit, onConnected, onDisconnect, subscribeState } from "../state/store";
 import { errorMessageOf } from "./errors";
 import { mountGateTable } from "./gateTable";
 import { toast } from "./notify";
@@ -202,7 +202,7 @@ export function mountParamsPanel(el: HTMLElement): void {
     }
   }));
 
-  app.subscribe(render);
+  subscribeState(render);
   onConnected(() => { epoch++; });
   onDisconnect(() => { epoch++; });
   onLocaleChange(() => { renderI18n(el); render(); });

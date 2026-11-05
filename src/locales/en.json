@@ -76,6 +76,7 @@
   "errors.permissionDenied": "Permission denied on {path}. On Linux, add yourself to the dialout group: sudo usermod -aG dialout $USER, then log out and back in.",
   "errors.notFound": "Port {path} not found. Check that the sensor is plugged in.",
   "errors.inUse": "{path} is in use by another program (serial monitor, Arduino IDE, ModemManager…). Close it and try again.",
+  "errors.notLd2402": "No LD2402 answered on {path}. Check the wiring (TX↔RX) and the power supply.",
   "errors.timeout": "The sensor did not answer in time (command {word}).",
   "errors.nack": "The sensor rejected command {word} (status {status}).",
   "errors.unsupported": "{feature} is not supported by this firmware (requires {required}).",
@@ -126,5 +127,8 @@
   "firmware.featSave": "Permanent save",
   "firmware.featGain": "Auto gain adjustment",
   "firmware.featSerial": "Serial number (text)",
-  "firmware.olderHint": "On older firmware, the matching button is greyed out with an explanation."
+  "firmware.olderHint": "On older firmware, the matching button is greyed out with an explanation.",
+  "features.autoGain": "Auto gain adjustment",
+  "features.permanentSave": "Permanent save",
+  "features.serialText": "Serial number (text)"
 }

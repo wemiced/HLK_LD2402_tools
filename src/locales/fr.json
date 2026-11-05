@@ -76,6 +76,7 @@
   "errors.permissionDenied": "Permission refusée sur {path}. Sous Linux, ajoutez-vous au groupe dialout : sudo usermod -aG dialout $USER, puis fermez et rouvrez votre session.",
   "errors.notFound": "Port {path} introuvable. Vérifiez que le capteur est branché.",
   "errors.inUse": "{path} est utilisé par un autre programme (moniteur série, Arduino IDE, ModemManager…). Fermez-le puis réessayez.",
+  "errors.notLd2402": "Aucun LD2402 n'a répondu sur {path}. Vérifiez le câblage (TX↔RX) et l'alimentation.",
   "errors.timeout": "Le capteur n'a pas répondu à temps (commande {word}).",
   "errors.nack": "Le capteur a refusé la commande {word} (statut {status}).",
   "errors.unsupported": "{feature} n'est pas pris en charge par ce firmware (nécessite {required}).",
@@ -126,5 +127,8 @@
   "firmware.featSave": "Sauvegarde permanente",
   "firmware.featGain": "Ajustement auto du gain",
   "firmware.featSerial": "Numéro de série (texte)",
-  "firmware.olderHint": "Sur un firmware plus ancien, le bouton correspondant est grisé avec une explication."
+  "firmware.olderHint": "Sur un firmware plus ancien, le bouton correspondant est grisé avec une explication.",
+  "features.autoGain": "Ajustement auto du gain",
+  "features.permanentSave": "Sauvegarde permanente",
+  "features.serialText": "Numéro de série (texte)"
 }

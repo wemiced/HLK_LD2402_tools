@@ -2,7 +2,7 @@
 use crate::config_file::{self, ConfigError};
 use crate::device::{CalibCoefficients, Device, DeviceError, DeviceEvent, DeviceInfo};
 use crate::ports::{self, PortInfo};
-use crate::protocol::commands::SensorParams;
+use crate::protocol::commands::{CMD_READ_VERSION, SensorParams};
 use crate::protocol::convert::raw_to_db;
 use crate::protocol::frame::RawEngineering;
 use crate::sim::{SimOptions, SimSensor};
@@ -104,6 +104,20 @@ impl AppState {
         Ok(f(d)?)
     }
 
+    /// Stores a freshly opened device, unless its link already died: its
+    /// disconnect notification may have run before the device was stored.
+    /// Checked under the lock, so a later death always finds it to drop.
+    fn install(&self, gen_id: u64, device: Device) -> Result<(), DeviceError> {
+        let mut g = self.lock();
+        if !device.is_alive() {
+            drop(g);
+            drop(device);
+            return Err(DeviceError::Disconnected);
+        }
+        *g = Some((gen_id, device));
+        Ok(())
+    }
+
     /// Best-effort shutdown, used on app exit.
     pub fn close(&self) {
         if let Some(d) = self.take() {
@@ -155,6 +169,17 @@ fn open_transport(path: &str) -> Result<Box<dyn Transport>, DeviceError> {
     }
 }
 
+/// A port that opens but never answers the version read is not an LD2402
+/// (wrong device, TX/RX swapped, or no power).
+fn open_error(e: DeviceError, path: &str) -> DeviceError {
+    match e {
+        DeviceError::Timeout {
+            word: CMD_READ_VERSION,
+        } => DeviceError::NotLd2402 { path: path.into() },
+        e => e,
+    }
+}
+
 #[tauri::command]
 pub async fn list_ports(probe: bool) -> ApiResult<Vec<PortInfo>> {
     tauri::async_runtime::spawn_blocking(move || ports::list_ports(probe))
@@ -202,9 +227,10 @@ pub async fn connect(app: AppHandle, path: String) -> ApiResult<DeviceInfo> {
                     });
                 }
             }),
-        )?;
+        )
+        .map_err(|e| open_error(e, &path))?;
         let info = device.info();
-        *state.lock() = Some((gen_id, device));
+        state.install(gen_id, device)?;
         Ok::<_, ApiErrorDto>(info)
     })
     .await
@@ -343,5 +369,54 @@ mod tests {
             r.unwrap_err(),
             ApiErrorDto::Device(DeviceError::Disconnected)
         );
+    }
+
+    fn open_sim(opts: SimOptions) -> Result<Device, DeviceError> {
+        Device::open(Box::new(SimSensor::new(opts)), Box::new(|_| {}))
+    }
+
+    #[test]
+    fn silent_device_is_not_an_ld2402() {
+        let e = open_sim(SimOptions {
+            unresponsive: true,
+            ..Default::default()
+        })
+        .err()
+        .map(|e| open_error(e, "/dev/ttyUSB0"));
+        assert_eq!(
+            e,
+            Some(DeviceError::NotLd2402 {
+                path: "/dev/ttyUSB0".into()
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(DeviceError::NotLd2402 {
+                path: "/dev/x".into()
+            })
+            .unwrap(),
+            json!({"kind": "notLd2402", "path": "/dev/x"})
+        );
+        // other open failures keep their own meaning
+        let t = DeviceError::Timeout { word: 0x0011 };
+        assert_eq!(open_error(t.clone(), "/dev/x"), t);
+    }
+
+    #[test]
+    fn dead_device_is_not_installed() {
+        let d = open_sim(SimOptions {
+            fail_after_reads: Some(20),
+            ..Default::default()
+        })
+        .unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while d.is_alive() && std::time::Instant::now() < end {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let s = AppState::default();
+        assert_eq!(s.install(1, d), Err(DeviceError::Disconnected));
+        assert!(s.lock().is_none());
+        let live = open_sim(SimOptions::default()).unwrap();
+        assert_eq!(s.install(2, live), Ok(()));
+        assert!(s.lock().is_some());
     }
 }

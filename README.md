@@ -54,7 +54,7 @@ Do not use 5 V logic levels.
 ## Usage tips
 
 - Pick the port, click **Connect**. The sensor is put in engineering mode for the live view, and always put back in normal mode when you disconnect or quit.
-- Edits are **drafts**: nothing is sent to the sensor until you press **Write**. On firmware 3.3.2 and later, Write also saves the values permanently; on older firmware they last until the next power cycle.
+- Edits are **drafts**: nothing is sent to the sensor until you press **Write**. On firmware 3.3.2 and later, Write also saves the values permanently; on older firmware, whether they survive a power cycle is still to be verified on hardware.
 - Drag a threshold handle on the chart to change it; the value is still a draft until written.
 - Calibration coefficients: a higher coefficient makes the sensor more sensitive (1.0 to 20.0).
 - Import requires a connected sensor.

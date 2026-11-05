@@ -30,7 +30,7 @@ it("every DeviceError kind has an errors.<kind> string", () => {
   const types = readFileSync(join(dir, "..", "types.ts"), "utf8");
   const block = types.slice(types.indexOf("export type DeviceError"), types.indexOf("export type ConfigError"));
   const kinds = [...block.matchAll(/kind: "(\w+)"/g)].map((m) => m[1]);
-  expect(kinds.length).toBe(9);
+  expect(kinds.length).toBe(10);
   for (const k of kinds) expect(en[`errors.${k}`], k).toBeTruthy();
   for (const k of ["notAConfig", "unsupportedVersion", "outOfRange"]) expect(en[`errors.config.${k}`], k).toBeTruthy();
 });

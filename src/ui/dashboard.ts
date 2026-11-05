@@ -1,10 +1,11 @@
-import { ApiError, onFrame, readParams, setStreaming } from "../api";
+import { onFrame, readParams, setStreaming } from "../api";
 import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
 import { isDirty, previewPresence, setThreshold } from "../state/draft";
 import { app, canEdit, onConnected, onDisconnect } from "../state/store";
 import type { PresenceKind } from "../types";
 import { createDistanceChart } from "./distanceChart";
 import { createEnergyChart } from "./energyChart";
+import { errorMessageOf } from "./errors";
 import { toast } from "./notify";
 
 const TEMPLATE = `
@@ -48,11 +49,6 @@ const STATE_KEY: Record<PresenceKind, string> = {
   still: "status.micro",
   none: "status.empty",
 };
-
-function errText(e: unknown): string {
-  if (e instanceof ApiError) return t("errors." + e.kind, e.data as Record<string, string | number>);
-  return t("errors.unknown");
-}
 
 export function mountDashboard(el: HTMLElement): void {
   el.innerHTML = TEMPLATE;
@@ -139,7 +135,7 @@ export function mountDashboard(el: HTMLElement): void {
       await setStreaming(next);
       if (live(ep)) app.set({ streaming: next });
     } catch (e) {
-      if (live(ep)) toast("error", errText(e));
+      if (live(ep)) toast("error", errorMessageOf(e));
     }
   });
 
@@ -174,7 +170,7 @@ export function mountDashboard(el: HTMLElement): void {
       await setStreaming(true);
       if (live(ep)) app.set({ streaming: true });
     } catch (e) {
-      if (live(ep)) toast("error", errText(e));
+      if (live(ep)) toast("error", errorMessageOf(e));
     }
   });
   onDisconnect(() => {

@@ -1,5 +1,5 @@
 import { onLocaleChange, renderI18n, t } from "../i18n";
-import { app } from "../state/store";
+import { app, subscribeState } from "../state/store";
 import type { Capabilities } from "../types";
 
 // Firmware update is gated: the vendor protocol is undocumented (see
@@ -40,7 +40,7 @@ export function mountFirmware(el: HTMLElement): void {
       c.textContent = info ? (info.capabilities[c.dataset.cap as keyof Capabilities] ? "✓" : "✗") : "—";
     }
   };
-  app.subscribe(render);
+  subscribeState(render);
   onLocaleChange(() => { renderI18n(el); render(); });
   renderI18n(el);
   render();

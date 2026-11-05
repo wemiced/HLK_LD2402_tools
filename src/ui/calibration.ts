@@ -1,13 +1,15 @@
 import { autoGain, onAutoGainDone, onCalibDone, onCalibFailed, onCalibProgress, readParams, setStreaming, startCalibration } from "../api";
 import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
 import { isDirty } from "../state/draft";
-import { app, onDisconnect } from "../state/store";
+import { app, onDisconnect, subscribeState } from "../state/store";
 import { errorMessage, errorMessageOf } from "./errors";
 import { toast } from "./notify";
 import { confirmDiscardIfDirty } from "./paramsPanel";
 
 const GATES = 16;
 const CALIB_IDLE_MS = 15_000;
+/** Hard cap on a whole calibration, however progress moves. */
+const CALIB_MAX_MS = 120_000;
 const AUTOGAIN_TIMEOUT_MS = 30_000;
 // Coefficient range/default follow the manual ("higher = more sensitive").
 // TODO(hardware): verify the range and default against a real sensor.
@@ -65,10 +67,20 @@ export function mountCalibration(el: HTMLElement): void {
   let epoch = 0;
   let starting = false;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
-  const stopWatchdog = () => { if (watchdog) clearTimeout(watchdog); watchdog = null; };
+  let deadline: ReturnType<typeof setTimeout> | null = null;
+  const stopWatchdog = () => {
+    if (watchdog) clearTimeout(watchdog);
+    if (deadline) clearTimeout(deadline);
+    watchdog = deadline = null;
+  };
   const kick = () => {
-    stopWatchdog();
+    if (watchdog) clearTimeout(watchdog);
     watchdog = setTimeout(() => void abort(t("calib.timeout")), CALIB_IDLE_MS);
+  };
+  const arm = () => {
+    stopWatchdog();
+    kick();
+    deadline = setTimeout(() => void abort(t("calib.timeout")), CALIB_MAX_MS);
   };
   const live = (e: number) => e === epoch && app.get().connection === "connected";
 
@@ -149,7 +161,7 @@ export function mountCalibration(el: HTMLElement): void {
     gates = [];
     wasStreaming = app.get().streaming;
     goto("measure");
-    kick();
+    arm();
     try {
       // the device answers Busy to other commands during calibration
       if (wasStreaming) {
@@ -173,8 +185,11 @@ export function mountCalibration(el: HTMLElement): void {
 
   void onCalibProgress((p) => {
     if (step !== "measure") return;
+    const next = Math.max(0, Math.min(100, Math.round(p)));
+    // only real progress proves the sensor is still calibrating
+    if (next <= progress) return;
     kick();
-    progress = Math.max(0, Math.min(100, Math.round(p)));
+    progress = next;
     render();
   });
   void onCalibDone(async (d) => {
@@ -205,7 +220,7 @@ export function mountCalibration(el: HTMLElement): void {
     gates = [];
     goto("prepare");
   });
-  app.subscribe(render);
+  subscribeState(render);
   onLocaleChange(() => { renderI18n(el); render(); });
   render();
 }
@@ -267,7 +282,7 @@ export function mountCalibrationCard(el: HTMLElement): void {
     toast("success", t("calib.autoGainDone"));
   });
   onDisconnect(() => { clear(); setBusy(false); });
-  app.subscribe(render);
+  subscribeState(render);
   onLocaleChange(() => { renderI18n(el); render(); });
   render();
 }

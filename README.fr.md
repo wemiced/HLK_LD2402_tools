@@ -54,7 +54,7 @@ N'utilisez pas de niveaux logiques 5 V.
 ## Conseils d'utilisation
 
 - Choisissez le port puis cliquez sur **Connecter**. Le capteur passe en mode ingénieur pour la vue en direct, et est toujours remis en mode normal à la déconnexion ou à la fermeture.
-- Les modifications sont des **brouillons** : rien n'est envoyé au capteur tant que vous n'appuyez pas sur **Écrire**. Avec un firmware 3.3.2 ou plus récent, l'écriture sauvegarde aussi les valeurs de façon permanente ; sur un firmware plus ancien, elles durent jusqu'à la prochaine coupure d'alimentation.
+- Les modifications sont des **brouillons** : rien n'est envoyé au capteur tant que vous n'appuyez pas sur **Écrire**. Avec un firmware 3.3.2 ou plus récent, l'écriture sauvegarde aussi les valeurs de façon permanente ; sur un firmware plus ancien, leur conservation après une coupure d'alimentation reste à vérifier sur le matériel.
 - Faites glisser la poignée d'un seuil sur le graphique pour le changer ; cela reste un brouillon jusqu'à l'écriture.
 - Coefficients de calibration : plus le coefficient est élevé, plus le capteur est sensible (1,0 à 20,0).
 - L'import nécessite un capteur connecté.

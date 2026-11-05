@@ -1,5 +1,5 @@
 import { t } from "../i18n";
-import { app } from "../state/store";
+import { app, subscribeState } from "../state/store";
 
 let toastBox: HTMLElement | null = null;
 
@@ -51,6 +51,6 @@ export function installPowerBanner(): void {
   };
   // dismissal lasts for the connection; reset when it drops
   let dismissed = false;
-  app.subscribe(sync);
+  subscribeState(sync);
   sync();
 }

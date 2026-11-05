@@ -1,8 +1,8 @@
-import { connect, disconnect, listPorts, onDisconnected, ApiError } from "../api";
+import { connect, disconnect, listPorts, onDisconnected } from "../api";
 import { availableLocales, getLocale, onLocaleChange, renderI18n, setLocale, t } from "../i18n";
 import { isDirty } from "../state/draft";
-import { app, type ViewId } from "../state/store";
-import { errorMessage } from "./errors";
+import { app, subscribeState, type ViewId } from "../state/store";
+import { errorMessageOf } from "./errors";
 import { toast } from "./notify";
 import { confirmDiscardIfDirty } from "./paramsPanel";
 
@@ -86,10 +86,14 @@ export function mountShell(root: HTMLElement): void {
   }
 
   // --- render from state
+  let shownTheme: string | undefined;
   function update(): void {
     const s = app.get();
-    const themeBtn = $("#theme-toggle");
-    themeBtn.querySelector("svg")!.outerHTML = document.body.dataset.theme === "light" ? SUN : MOON;
+    const theme = document.body.dataset.theme;
+    if (theme !== shownTheme) {
+      shownTheme = theme;
+      $("#theme-toggle").querySelector("svg")!.outerHTML = theme === "light" ? SUN : MOON;
+    }
     root.querySelectorAll<HTMLElement>(".rail [data-view]").forEach((b) => b.classList.toggle("on", b.dataset.view === s.view));
     root.querySelectorAll<HTMLElement>("section[data-view]").forEach((e) => e.classList.toggle("on", e.dataset.view === s.view));
     $("#title").textContent = t("nav." + s.view);
@@ -105,6 +109,8 @@ export function mountShell(root: HTMLElement): void {
   }
 
   // --- connection flow
+  // bumped by device://disconnected while connecting: the pending result is stale
+  let connectEpoch = 0;
   async function toggleConnection(): Promise<void> {
     const s = app.get();
     if (s.connection === "connecting") return;
@@ -117,13 +123,19 @@ export function mountShell(root: HTMLElement): void {
     if (!select.value) return;
     if (isDirty(s.sensor, s.draft) && !(await confirmDiscardIfDirty())) return;
     app.set({ connection: "connecting", port: select.value });
+    const ep = ++connectEpoch;
     try {
       const info = await connect(select.value);
+      if (ep !== connectEpoch) {
+        // the link dropped before the answer arrived: the core no longer holds it
+        app.set({ connection: "disconnected", info: null });
+        toast("error", t("errors.disconnected"));
+        return;
+      }
       app.set({ info, connection: "connected" });
     } catch (e) {
-      const data = e instanceof ApiError ? { ...e.data, kind: e.kind } : { kind: "io", message: String(e) };
       app.set({ connection: "disconnected", info: null });
-      toast("error", errorMessage(data));
+      toast("error", errorMessageOf(e));
     }
   }
 
@@ -174,8 +186,10 @@ export function mountShell(root: HTMLElement): void {
     renderPortLabels();
     update();
   });
-  app.subscribe(update);
+  subscribeState(update);
   void onDisconnected(() => {
+    // during a connect, the connect result reports the outcome (one toast)
+    if (app.get().connection === "connecting") { connectEpoch++; return; }
     if (app.get().connection === "disconnected") return;
     app.set({ connection: "disconnected", info: null, streaming: false });
     toast("error", t("errors.disconnected"));

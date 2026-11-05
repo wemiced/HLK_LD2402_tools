@@ -235,3 +235,41 @@ it("auto gain, calibration and parameter I/O exclude each other", async () => {
   expect(app.get().calibrating).toBe(true);
   expect(gain.disabled).toBe(true);
 });
+
+it("calibration watchdog is only re-armed by progress that increases", async () => {
+  vi.useFakeTimers();
+  try {
+    q("start").click();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    h.cb.progress(10 as never); // deadline now 20 s
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(4_000);
+      h.cb.progress(10 as never); // repeated value: no re-arm
+    }
+    await vi.advanceTimersByTimeAsync(3_001);
+    expect(h.toast).toHaveBeenCalledWith("error", "The calibration did not finish: the sensor stopped responding.");
+    expect(q("step-prepare").hidden).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("a calibration is aborted after 120 s even if progress keeps moving", async () => {
+  vi.useFakeTimers();
+  try {
+    q("start").click();
+    await vi.advanceTimersByTimeAsync(0);
+    for (let p = 5; p <= 55; p += 5) {
+      await vi.advanceTimersByTimeAsync(10_000);
+      h.cb.progress(p as never);
+    }
+    await vi.advanceTimersByTimeAsync(9_900); // 119.9 s
+    expect(q("step-measure").hidden).toBe(false);
+    await vi.advanceTimersByTimeAsync(101);
+    expect(h.toast).toHaveBeenCalledWith("error", "The calibration did not finish: the sensor stopped responding.");
+    expect(app.get().calibrating).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});

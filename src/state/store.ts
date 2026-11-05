@@ -2,14 +2,15 @@ import type { DeviceInfo, FrameDto, SensorParams } from "../types";
 
 export function createStore<T extends object>(initial: T) {
   let state = initial;
-  const subs = new Set<(s: T) => void>();
+  const subs = new Set<(s: T, prev: T) => void>();
   return {
     get: () => state,
     set(patch: Partial<T>) {
+      const prev = state;
       state = { ...state, ...patch };
-      subs.forEach((fn) => fn(state));
+      subs.forEach((fn) => fn(state, prev));
     },
-    subscribe(fn: (s: T) => void) {
+    subscribe(fn: (s: T, prev: T) => void) {
       subs.add(fn);
       return () => {
         subs.delete(fn);
@@ -52,6 +53,15 @@ export const app = createStore<AppState>({
   lastFrame: null,
   series: "trigger",
 });
+
+/** True when an update changed nothing but the live frame (10 Hz): most views can skip it. */
+export function onlyFrameChanged(s: AppState, prev: AppState): boolean {
+  return (Object.keys(s) as (keyof AppState)[]).every((k) => k === "lastFrame" || s[k] === prev[k]);
+}
+
+/** Subscribe, skipping frame-only updates. */
+export const subscribeState = (fn: () => void) =>
+  app.subscribe((s, prev) => { if (!onlyFrameChanged(s, prev)) fn(); });
 
 /** Draft edits are allowed only while connected and no device operation could overwrite them. */
 export const canEdit = (s: AppState): boolean =>

@@ -185,3 +185,47 @@ it("refresh keeps the selected port and is disabled unless disconnected", async 
   expect(app.get().connection).toBe("connected");
   expect(refresh.disabled).toBe(true);
 });
+
+it("a device that never answers is reported as not an LD2402", async () => {
+  h.connect.mockRejectedValue(new h.ApiError({ kind: "notLd2402", path: "/dev/ttyUSB0" }));
+  connectBtn().click();
+  await flush();
+  expect(document.querySelector(".toast.error")!.textContent).toBe(
+    "No LD2402 answered on /dev/ttyUSB0. Check the wiring (TX↔RX) and the power supply.",
+  );
+});
+
+it("a disconnect during connect gives one toast and ignores a late success", async () => {
+  let resolve!: (v: unknown) => void;
+  h.connect.mockReturnValue(new Promise((r) => (resolve = r)));
+  connectBtn().click();
+  h.disconnectedCb!({ reason: "gone" });
+  resolve(h.info);
+  await flush();
+  expect(app.get().connection).toBe("disconnected");
+  expect(app.get().info).toBeNull();
+  const toasts = document.querySelectorAll(".toast.error");
+  expect(toasts.length).toBe(1);
+  expect(toasts[0].textContent).toContain("disconnected");
+});
+
+it("a failed open that also emitted device://disconnected shows only the connect error", async () => {
+  let reject!: (e: unknown) => void;
+  h.connect.mockReturnValue(new Promise((_, r) => (reject = r)));
+  connectBtn().click();
+  h.disconnectedCb!({ reason: "gone" });
+  reject(new h.ApiError({ kind: "notLd2402", path: "/dev/ttyUSB0" }));
+  await flush();
+  const toasts = document.querySelectorAll(".toast.error");
+  expect(toasts.length).toBe(1);
+  expect(toasts[0].textContent).toContain("No LD2402");
+});
+
+it("a frame-only update does not rewrite the shell (theme icon kept)", () => {
+  const svg = root.querySelector("#theme-toggle svg");
+  app.set({ lastFrame: { presence: "none", distanceM: 0, motionDb: [], microDb: [] } });
+  expect(root.querySelector("#theme-toggle svg")).toBe(svg);
+  app.set({ view: "firmware" });
+  expect(root.querySelector("#theme-toggle svg")).toBe(svg);
+  app.set({ lastFrame: null, view: "dashboard" });
+});

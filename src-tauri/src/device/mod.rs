@@ -40,6 +40,8 @@ pub enum DeviceError {
     NotFound { path: String },
     #[error("serial port {path} is in use by another program")]
     InUse { path: String },
+    #[error("no LD2402 answered on {path}")]
+    NotLd2402 { path: String },
     #[error("no answer to command {word:#06x}")]
     Timeout { word: u16 },
     #[error("command {word:#06x} rejected with status {status}")]
@@ -434,6 +436,11 @@ impl Device {
             auto_gain_until,
             auto_gain_limit: AUTO_GAIN_LIMIT,
         })
+    }
+
+    /// False once the worker has lost the transport.
+    pub fn is_alive(&self) -> bool {
+        !self.link.dead.load(Ordering::SeqCst)
     }
 
     pub fn info(&self) -> DeviceInfo {

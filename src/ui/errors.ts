@@ -4,8 +4,15 @@ import { t } from "../i18n";
 /** Localized message for an error payload ({kind, ...data}). */
 export function errorMessage(data: Record<string, unknown>): string {
   const kind = String(data.kind);
-  const params = data as Record<string, string | number>;
+  const params = { ...data } as Record<string, string | number>;
   if (kind === "config") return t("errors.config." + String(data.reason), params);
+  if (kind === "unsupported") {
+    const feature = "features." + String(data.feature);
+    params.feature = t(feature) === feature ? String(data.feature) : t(feature);
+  }
+  if ((kind === "timeout" || kind === "nack") && typeof data.word === "number") {
+    params.word = "0x" + data.word.toString(16).toUpperCase().padStart(4, "0");
+  }
   const key = "errors." + kind;
   return t(key, params) === key ? t("errors.unknown") : t(key, params);
 }

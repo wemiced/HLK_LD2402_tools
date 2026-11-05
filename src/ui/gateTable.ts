@@ -1,6 +1,6 @@
-import { formatNumber, onLocaleChange, renderI18n } from "../i18n";
+import { formatNumber, onLocaleChange, renderI18n, t } from "../i18n";
 import { gatesInRange, setThreshold } from "../state/draft";
-import { app, canEdit } from "../state/store";
+import { app, canEdit, subscribeState } from "../state/store";
 
 const GATE_M = 0.7;
 
@@ -47,7 +47,7 @@ export function mountGateTable(drawer: HTMLElement): { open(): void; close(): vo
     rows.forEach((tr, i) => {
       tr.classList.toggle("off", i >= n);
       tr.querySelector('[data-role="range"]')!.textContent =
-        `${formatNumber(i * GATE_M, 1)}–${formatNumber((i + 1) * GATE_M, 1)} m`;
+        `${formatNumber(i * GATE_M, 1)}–${formatNumber((i + 1) * GATE_M, 1)} ${t("units.m")}`;
     });
     (["triggerDb", "microDb"] as const).forEach((key, k) => {
       inputs[k].forEach((inp, i) => {
@@ -60,7 +60,7 @@ export function mountGateTable(drawer: HTMLElement): { open(): void; close(): vo
 
   const dr = drawer;
   dr.querySelector('[data-role="close"]')!.addEventListener("click", () => dr.classList.remove("open"));
-  app.subscribe(sync);
+  subscribeState(sync);
   onLocaleChange(() => { renderI18n(dr); sync(); });
   renderI18n(dr);
   sync();
