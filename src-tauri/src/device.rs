@@ -19,6 +19,10 @@ const ACK_TIMEOUT: Duration = Duration::from_millis(500);
 const ACK_ATTEMPTS: u32 = 2;
 const CLEANUP_TIMEOUT: Duration = Duration::from_millis(300);
 const CALIB_POLL: Duration = Duration::from_millis(500);
+/// How long an unanswered attempt's ACK is still expected (and discarded).
+const STALE_WINDOW: Duration = Duration::from_millis(1000);
+/// Extra caller-side margin over the worker's own ACK deadline.
+const REPLY_MARGIN: Duration = Duration::from_millis(500);
 const DEFAULT_BUFFER: u16 = 0x20;
 const MODE_ENGINEERING: u32 = 0x04;
 const MODE_NORMAL: u32 = 0x64;
@@ -76,6 +80,7 @@ pub enum DeviceEvent {
     Text(TextReport),
     CalibProgress(u8),
     CalibDone { gates: Vec<u8> },
+    CalibFailed { error: DeviceError },
     AutoGainDone,
     Disconnected { reason: String },
 }
@@ -142,8 +147,13 @@ impl Link {
         self.tx
             .send(Msg::Req(req))
             .map_err(|_| DeviceError::Disconnected)?;
-        // The worker always answers or drops the reply sender when it exits.
-        rx.recv().unwrap_or(Err(DeviceError::Disconnected))
+        // The worker answers or drops the sender; the bound guards against a
+        // worker stuck in a callback, so `close` can never hang.
+        match rx.recv_timeout(timeout * attempts + REPLY_MARGIN) {
+            Ok(r) => r,
+            Err(RecvTimeoutError::Timeout) => Err(DeviceError::Timeout { word }),
+            Err(RecvTimeoutError::Disconnected) => Err(DeviceError::Disconnected),
+        }
     }
 
     fn send(
@@ -160,6 +170,11 @@ impl Link {
     /// Normal request: 500 ms ACK timeout, one retry, status checked.
     fn cmd(&self, word: u16, value: &[u8]) -> Result<Vec<u8>, DeviceError> {
         self.send(word, value, ACK_TIMEOUT, ACK_ATTEMPTS)
+    }
+
+    /// Non-idempotent command: a single 500 ms attempt, never resent.
+    fn once(&self, word: u16, value: &[u8]) -> Result<Vec<u8>, DeviceError> {
+        self.send(word, value, ACK_TIMEOUT, 1)
     }
 
     /// Recovery/cleanup request: a single 300 ms attempt.
@@ -183,6 +198,31 @@ struct Pending {
     req: Request,
     deadline: Instant,
     left: u32,
+    sent: u32,
+}
+
+/// ACKs still owed for attempts that timed out; the next matching one is
+/// discarded so it cannot satisfy a later request with the same word.
+#[derive(Default)]
+struct Stale(Vec<(u16, Instant)>);
+
+impl Stale {
+    fn add(&mut self, word: u16, n: u32) {
+        let until = Instant::now() + STALE_WINDOW;
+        self.0.extend((0..n).map(|_| (word, until)));
+    }
+    /// True (and forgets one entry) when an ACK of `word` is still owed.
+    fn take(&mut self, word: u16) -> bool {
+        let now = Instant::now();
+        self.0.retain(|(_, until)| *until > now);
+        match self.0.iter().position(|(w, _)| *w == word) {
+            Some(i) => {
+                self.0.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
 }
 
 /// Owns the transport: sends requests one at a time, routes inbound frames.
@@ -195,6 +235,7 @@ fn worker_loop(
     let mut dec = FrameDecoder::new();
     let mut queue: VecDeque<Request> = VecDeque::new();
     let mut pending: Option<Pending> = None;
+    let mut stale = Stale::default();
     let mut buf = [0u8; 512];
     let reason = loop {
         loop {
@@ -214,6 +255,7 @@ fn worker_loop(
             pending = Some(Pending {
                 deadline: Instant::now() + req.timeout,
                 left: req.attempts.saturating_sub(1),
+                sent: 1,
                 req,
             });
         }
@@ -228,7 +270,13 @@ fn worker_loop(
                     on_event(DeviceEvent::AutoGainDone)
                 }
                 Inbound::Cmd(f) => {
-                    if let Some(p) = pending.take_if(|p| f.word == p.req.word | ACK_BIT) {
+                    let word = f.word & !ACK_BIT;
+                    if f.word & ACK_BIT == 0 || stale.take(word) {
+                        continue;
+                    }
+                    if let Some(p) = pending.take_if(|p| word == p.req.word) {
+                        // Either attempt's ACK answers this request; the others are owed.
+                        stale.add(word, p.sent - 1);
                         let _ = p.req.reply.send(Ok(f));
                     }
                 }
@@ -241,11 +289,13 @@ fn worker_loop(
         {
             if p.left > 0 {
                 p.left -= 1;
+                p.sent += 1;
                 p.deadline = Instant::now() + p.req.timeout;
                 if let Err(e) = t.write_all(&p.req.frame) {
                     break e.to_string();
                 }
             } else if let Some(p) = pending.take() {
+                stale.add(p.req.word, p.sent);
                 let _ = p
                     .req
                     .reply
@@ -258,34 +308,52 @@ fn worker_loop(
     on_event(DeviceEvent::Disconnected { reason });
 }
 
-/// Polls progress until 100 %, then reports the disturbed gates and ends config.
-/// Returns early (leaving cleanup to `close`) when `stop` fires.
-fn calibration_loop(link: &Link, stop: &Receiver<()>) -> Result<(), DeviceError> {
+/// Polls progress until 100 % and returns the disturbed gates (config still
+/// open), or `None` when `stop` fires (cleanup is then left to `close`).
+fn poll_calibration(link: &Link, stop: &Receiver<()>) -> Result<Option<Vec<u8>>, DeviceError> {
     loop {
         if !matches!(
             stop.recv_timeout(CALIB_POLL),
             Err(RecvTimeoutError::Timeout)
         ) {
-            return Ok(());
+            return Ok(None);
         }
         let p = parse_progress(&link.cmd(CMD_CALIB_PROGRESS, &[])?).map_err(proto_err)?;
         link.emit(DeviceEvent::CalibProgress(p));
         if p >= 100 {
             let rest = link.cmd(CMD_CALIB_INTERFERENCE, &[])?;
-            let gates = parse_interference(&rest).map_err(proto_err)?;
-            link.emit(DeviceEvent::CalibDone { gates });
-            return link.cmd(CMD_END_CONFIG, &[]).map(drop);
+            return parse_interference(&rest).map(Some).map_err(proto_err);
         }
     }
 }
 
-/// Reads identity while recovering the sensor into a known state.
-/// If the quick recovery enable gets no ACK, one more 500 ms enable is tried
-/// (still ignored) so an unresponsive sensor fails on the version read in ~2.1 s.
-fn identify(link: &Link) -> Result<DeviceInfo, DeviceError> {
-    if link.quick(CMD_ENABLE_CONFIG, &ENABLE_VALUE).is_err() {
-        let _ = link.send(CMD_ENABLE_CONFIG, &ENABLE_VALUE, ACK_TIMEOUT, 1);
+/// Calibration helper body. Config is ended and `busy` cleared before the
+/// final event, so a call made on `CalibDone`/`CalibFailed` is not `Busy`.
+fn run_calibration(link: &Link, stop: &Receiver<()>, busy: &AtomicBool) {
+    let outcome = match poll_calibration(link, stop) {
+        Ok(None) => None,
+        Ok(Some(gates)) => Some(link.cmd(CMD_END_CONFIG, &[]).map(|_| gates)),
+        Err(e) => {
+            let _ = link.quick(CMD_END_CONFIG, &[]);
+            Some(Err(e))
+        }
+    };
+    busy.store(false, Ordering::SeqCst);
+    match outcome {
+        Some(Ok(gates)) => link.emit(DeviceEvent::CalibDone { gates }),
+        // Transport death already emitted `Disconnected`.
+        Some(Err(DeviceError::Disconnected)) | None => {}
+        Some(Err(error)) => link.emit(DeviceEvent::CalibFailed { error }),
     }
+}
+
+/// Reads identity while recovering the sensor into a known state.
+/// If the recovery enable gets no ACK, one more quick enable is tried (still
+/// ignored), so an unresponsive sensor fails on the version read in ~1.9 s.
+/// `entered` is set once an enable was ACKed, so a failed open can clean up.
+fn identify(link: &Link, entered: &mut bool) -> Result<DeviceInfo, DeviceError> {
+    *entered = link.quick(CMD_ENABLE_CONFIG, &ENABLE_VALUE).is_ok()
+        || link.quick(CMD_ENABLE_CONFIG, &ENABLE_VALUE).is_ok();
     let _ = link.quick(CMD_OUTPUT_MODE, &mode_value(MODE_NORMAL));
     let firmware = parse_version_ack(&link.cmd(CMD_READ_VERSION, &[])?).map_err(proto_err)?;
     let caps = capabilities(parse_version(&firmware));
@@ -342,9 +410,13 @@ impl Device {
                 message: e.to_string(),
             })?;
         let link = Link { tx, dead };
-        let info = match identify(&link) {
+        let mut entered = false;
+        let info = match identify(&link, &mut entered) {
             Ok(v) => v,
             Err(e) => {
+                if entered {
+                    link.restore_normal(); // never leave the sensor in config mode
+                }
                 let _ = link.tx.send(Msg::Shutdown);
                 let _ = worker.join();
                 return Err(e);
@@ -442,7 +514,7 @@ impl Device {
         let _g = self.begin()?;
         self.enable_config()?;
         let value = calib_value(c.trigger, c.hold, c.micro);
-        if let Err(e) = self.link.cmd(CMD_CALIB_START, &value) {
+        if let Err(e) = self.link.once(CMD_CALIB_START, &value) {
             let _ = self.link.quick(CMD_END_CONFIG, &[]);
             return Err(e);
         }
@@ -454,12 +526,7 @@ impl Device {
         let (stop_tx, stop_rx) = mpsc::channel();
         let link = self.link.clone();
         let flag = Arc::clone(&self.calibrating);
-        let helper = thread::spawn(move || {
-            if calibration_loop(&link, &stop_rx).is_err() {
-                let _ = link.quick(CMD_END_CONFIG, &[]);
-            }
-            flag.store(false, Ordering::SeqCst);
-        });
+        let helper = thread::spawn(move || run_calibration(&link, &stop_rx, &flag));
         *slot = Some((stop_tx, helper));
         Ok(())
     }
@@ -472,7 +539,7 @@ impl Device {
                 required: "3.3.5".into(),
             });
         }
-        self.in_config(false, |_| self.link.cmd(CMD_AUTO_GAIN, &[]).map(drop))
+        self.in_config(false, |_| self.link.once(CMD_AUTO_GAIN, &[]).map(drop))
     }
 
     pub fn close(self) {
@@ -527,6 +594,51 @@ mod tests {
         (d, h, rx)
     }
 
+    /// Sim wrapper whose filter decides which frames (by command word) reach the sim.
+    type Filter = Box<dyn FnMut(u16, &[u8]) -> Vec<Vec<u8>> + Send>;
+
+    struct Tamper {
+        inner: SimSensor,
+        filter: Filter,
+    }
+
+    impl Transport for Tamper {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+        fn write_all(&mut self, data: &[u8]) -> std::io::Result<()> {
+            let word = u16::from_le_bytes([data[6], data[7]]);
+            for f in (self.filter)(word, data) {
+                self.inner.write_all(&f)?;
+            }
+            Ok(())
+        }
+    }
+
+    fn try_open_tampered(
+        filter: Filter,
+    ) -> (
+        Result<Device, DeviceError>,
+        SimHandle,
+        Receiver<DeviceEvent>,
+    ) {
+        let inner = SimSensor::new(SimOptions::default());
+        let h = inner.sim_handle();
+        let (tx, rx) = mpsc::channel();
+        let d = Device::open(
+            Box::new(Tamper { inner, filter }),
+            Box::new(move |e| {
+                let _ = tx.send(e);
+            }),
+        );
+        (d, h, rx)
+    }
+
+    /// Drops every frame carrying `word`.
+    fn drop_word(word: u16) -> Filter {
+        Box::new(move |w, f| if w == word { vec![] } else { vec![f.to_vec()] })
+    }
+
     fn open(opts: SimOptions) -> (Device, SimHandle, Receiver<DeviceEvent>) {
         let (d, h, rx) = try_open(opts);
         match d {
@@ -557,18 +669,6 @@ mod tests {
         p.trigger_db[3] = 55.0;
         p.micro_db[15] = 21.0;
         p
-    }
-
-    /// Polls `cond` for up to `ms`.
-    fn eventually(ms: u64, cond: impl Fn() -> bool) -> bool {
-        let end = Instant::now() + Duration::from_millis(ms);
-        while Instant::now() < end {
-            if cond() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        cond()
     }
 
     #[test]
@@ -662,11 +762,10 @@ mod tests {
         let (d, h, rx) = open(SimOptions::default());
         d.start_calibration(coeffs()).unwrap();
         let mut progress = vec![];
+        let end = Instant::now() + Duration::from_secs(10);
         let gates = loop {
-            match rx
-                .recv_timeout(Duration::from_secs(10))
-                .expect("calibration event")
-            {
+            let left = end.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left).expect("CalibDone within 10 s") {
                 DeviceEvent::CalibProgress(p) => progress.push(p),
                 DeviceEvent::CalibDone { gates } => break gates,
                 _ => {}
@@ -675,8 +774,69 @@ mod tests {
         assert!(progress.windows(2).all(|w| w[0] < w[1]), "{progress:?}");
         assert_eq!(progress.last(), Some(&100));
         assert_eq!(gates, vec![1, 10, 15]);
-        assert!(eventually(1000, || !h.in_config()));
-        assert!(eventually(1000, || d.read_params().is_ok()));
+        assert!(!h.in_config());
+        assert_eq!(d.read_params(), Ok(h.params()));
+    }
+
+    #[test]
+    fn calibration_failure_emits_event_and_clears_busy() {
+        let (d, h, rx) = try_open_tampered(drop_word(CMD_CALIB_PROGRESS));
+        let d = d.unwrap_or_else(|e| panic!("open failed: {e}"));
+        d.start_calibration(coeffs()).unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        let error = loop {
+            let left = end.saturating_duration_since(Instant::now());
+            match rx.recv_timeout(left).expect("CalibFailed within 5 s") {
+                DeviceEvent::CalibFailed { error } => break error,
+                DeviceEvent::CalibDone { .. } => panic!("unexpected CalibDone"),
+                _ => {}
+            }
+        };
+        assert_eq!(
+            error,
+            DeviceError::Timeout {
+                word: CMD_CALIB_PROGRESS
+            }
+        );
+        assert!(!h.in_config());
+        assert_eq!(d.read_params(), Ok(h.params()));
+    }
+
+    #[test]
+    fn failed_open_leaves_config_mode() {
+        let (d, h, _rx) = try_open_tampered(drop_word(CMD_READ_SN_TEXT));
+        assert_eq!(
+            d.err(),
+            Some(DeviceError::Timeout {
+                word: CMD_READ_SN_TEXT
+            })
+        );
+        assert!(!h.in_config() && !h.engineering());
+    }
+
+    #[test]
+    fn late_ack_after_retry_is_not_taken_by_next_chunk() {
+        // 0x0008 writes: #1 is open's power read; #2 (chunk 1) is held until
+        // #4 (chunk 2), so chunk 1's late ACK lands while chunk 2 is pending.
+        let mut n = 0;
+        let mut held = None;
+        let filter: Filter = Box::new(move |w, f| {
+            if w != CMD_READ_PARAMS {
+                return vec![f.to_vec()];
+            }
+            n += 1;
+            match n {
+                2 => {
+                    held = Some(f.to_vec());
+                    vec![]
+                }
+                4 => held.take().into_iter().chain([f.to_vec()]).collect(),
+                _ => vec![f.to_vec()],
+            }
+        });
+        let (d, h, _rx) = try_open_tampered(filter);
+        let d = d.unwrap_or_else(|e| panic!("open failed: {e}"));
+        assert_eq!(d.read_params(), Ok(h.params()));
     }
 
     #[test]
