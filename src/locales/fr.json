@@ -113,5 +113,6 @@
   "params.discardTitle": "Modifications non écrites",
   "table.close": "Fermer",
   "units.db": "dB",
-  "params.jsonFilter": "Configuration (JSON)"
+  "params.jsonFilter": "Configuration (JSON)",
+  "params.writtenRereadFailed": "Paramètres écrits, mais leur relecture a échoué."
 }

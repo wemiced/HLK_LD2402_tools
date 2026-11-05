@@ -113,5 +113,6 @@
   "params.discardTitle": "Unsaved changes",
   "table.close": "Close",
   "units.db": "dB",
-  "params.jsonFilter": "Configuration (JSON)"
+  "params.jsonFilter": "Configuration (JSON)",
+  "params.writtenRereadFailed": "Settings written, but re-reading them failed."
 }

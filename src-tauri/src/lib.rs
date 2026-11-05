@@ -24,10 +24,19 @@ pub fn run() {
             api::export_config,
             api::import_config
         ])
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                // `close` is idempotent (it takes the device out of the state).
+                window.app_handle().state::<api::AppState>().close();
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
                 app.state::<api::AppState>().close();
             }
         });

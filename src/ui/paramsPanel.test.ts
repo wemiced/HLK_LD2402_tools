@@ -20,6 +20,8 @@ const h = vi.hoisted(() => {
     save: vi.fn(),
     open: vi.fn(),
     toast: vi.fn(),
+    close: vi.fn(async () => {}),
+    closeCb: null as null | ((e: unknown) => Promise<void>),
   };
 });
 
@@ -32,13 +34,19 @@ vi.mock("../api", () => ({
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: h.ask, save: h.save, open: h.open }));
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ onCloseRequested: vi.fn(async () => () => {}), destroy: vi.fn() }),
+  getCurrentWindow: () => ({
+    onCloseRequested: async (cb: (e: unknown) => Promise<void>) => {
+      h.closeCb = cb;
+      return () => {};
+    },
+    close: h.close,
+  }),
 }));
 vi.mock("./notify", () => ({ toast: h.toast, showBanner: vi.fn(), hideBanner: vi.fn() }));
 
 import { setLocale } from "../i18n";
 import { app } from "../state/store";
-import { confirmDiscardIfDirty, mountParamsPanel } from "./paramsPanel";
+import { confirmDiscardIfDirty, installCloseGuard, mountParamsPanel } from "./paramsPanel";
 import { mountGateTable } from "./gateTable";
 
 const wait = (ms = 20) => new Promise((r) => setTimeout(r, ms));
@@ -53,7 +61,7 @@ const q = <T extends HTMLElement>(role: string) => el.querySelector<T>(`[data-ro
 
 beforeEach(async () => {
   setLocale("en");
-  for (const m of [h.readParams, h.writeParams, h.exportConfig, h.importConfig, h.ask, h.save, h.open, h.toast]) m.mockReset();
+  for (const m of [h.readParams, h.writeParams, h.exportConfig, h.importConfig, h.ask, h.save, h.open, h.toast, h.close]) m.mockReset();
   h.readParams.mockResolvedValue(params);
   h.writeParams.mockResolvedValue(undefined);
   h.ask.mockResolvedValue(true);
@@ -140,4 +148,45 @@ it("import_sets_draft_and_error_toasts", async () => {
 it("seg_sets_series", () => {
   el.querySelectorAll<HTMLButtonElement>(".seg button")[1].click();
   expect(app.get().series).toBe("micro");
+});
+
+it("import_disabled_when_disconnected", async () => {
+  app.set({ connection: "disconnected" });
+  expect(q<HTMLButtonElement>("import").disabled).toBe(true);
+  app.set({ connection: "connected" });
+  expect(q<HTMLButtonElement>("import").disabled).toBe(false);
+  h.open.mockResolvedValue("/x.json");
+  h.importConfig.mockResolvedValue({ ...params, disappearDelayS: 99 });
+  q<HTMLButtonElement>("import").click();
+  await wait();
+  expect(q("dirty").classList.contains("show")).toBe(true);
+});
+
+it("write_ok_but_reread_fails_clears_banner", async () => {
+  slide("dist", "6");
+  h.readParams.mockRejectedValue(new Error("x"));
+  q<HTMLButtonElement>("write").click();
+  await wait();
+  expect(app.get().sensor!.maxDistanceM).toBe(6);
+  expect(q("dirty").classList.contains("show")).toBe(false);
+  expect(h.toast).toHaveBeenCalledWith("error", expect.stringContaining("re-reading"));
+});
+
+it("close_handler_confirm_closes_once_cancel_keeps", async () => {
+  await installCloseGuard();
+  slide("dist", "6");
+  const ev = () => ({ preventDefault: vi.fn() });
+  h.ask.mockResolvedValue(false);
+  const e1 = ev();
+  await h.closeCb!(e1);
+  expect(e1.preventDefault).toHaveBeenCalled();
+  expect(h.close).not.toHaveBeenCalled();
+  h.ask.mockResolvedValue(true);
+  await h.closeCb!(ev());
+  expect(h.close).toHaveBeenCalledTimes(1);
+  h.ask.mockClear();
+  const e3 = ev();
+  await h.closeCb!(e3);
+  expect(h.ask).not.toHaveBeenCalled();
+  expect(e3.preventDefault).not.toHaveBeenCalled();
 });

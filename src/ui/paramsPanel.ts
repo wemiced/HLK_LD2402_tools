@@ -51,10 +51,14 @@ export async function confirmDiscardIfDirty(): Promise<boolean> {
 export async function installCloseGuard(): Promise<void> {
   try {
     const win = getCurrentWindow();
+    let confirmed = false;
     await win.onCloseRequested(async (ev) => {
-      if (!dirtyNow()) return;
+      if (confirmed || !dirtyNow()) return;
       ev.preventDefault();
-      if (await confirmDiscardIfDirty()) await win.destroy();
+      if (await confirmDiscardIfDirty()) {
+        confirmed = true;
+        await win.close();
+      }
     });
   } catch {
     /* not running inside Tauri */
@@ -100,7 +104,7 @@ export function mountParamsPanel(el: HTMLElement): void {
     undoBtn.disabled = busy || !dirty;
     reloadBtn.disabled = busy || !connected;
     exportBtn.disabled = !p;
-    importBtn.disabled = busy;
+    importBtn.disabled = busy || !connected || !s.sensor;
     segBtns.forEach((b) => b.classList.toggle("on", b.dataset.series === s.series));
   }
 
@@ -134,7 +138,16 @@ export function mountParamsPanel(el: HTMLElement): void {
     const ep = epoch;
     try {
       await writeParams(draft);
-      const fresh = await readParams();
+      let fresh;
+      try {
+        fresh = await readParams();
+      } catch {
+        if (live(ep)) {
+          app.set({ sensor: draft, draft });
+          toast("error", t("params.writtenRereadFailed"));
+        }
+        return;
+      }
       if (!live(ep)) return;
       app.set({ sensor: fresh, draft: fresh });
       toast("success", t("params.written"));
