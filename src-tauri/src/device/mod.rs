@@ -559,8 +559,10 @@ impl Device {
         self.in_config(true, |buffer| self.read_all(buffer))
     }
 
-    /// Unguarded write; the app uses `write_params_guarded`.
-    pub fn write_params(&self, p: &SensorParams) -> Result<(), DeviceError> {
+    /// Unguarded write, test-only: outside tests every change must go
+    /// through `write_params_guarded`, so the compiler enforces backups.
+    #[cfg(test)]
+    pub(crate) fn write_params(&self, p: &SensorParams) -> Result<(), DeviceError> {
         let _g = self.begin()?;
         self.in_config(true, |buffer| self.write_all(buffer, p))
     }
@@ -587,8 +589,10 @@ impl Device {
         Ok(())
     }
 
-    /// Unguarded calibration; the app uses `start_calibration_guarded`.
-    pub fn start_calibration(&self, c: CalibCoefficients) -> Result<(), DeviceError> {
+    /// Unguarded calibration, test-only (see `write_params`); the app uses
+    /// `start_calibration_guarded`.
+    #[cfg(test)]
+    pub(crate) fn start_calibration(&self, c: CalibCoefficients) -> Result<(), DeviceError> {
         let _g = self.begin()?;
         self.enable_config()?;
         self.calibrate_in_config(c)

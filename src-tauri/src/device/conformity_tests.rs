@@ -1,5 +1,6 @@
 //! Golden-frame tests: every frame the app writes is pinned to the manual
-//! (chapter 5). Each test drives the real `Device` path over a recording transport.
+//! (chapter 5). Each test drives the path the app ships (guarded writes and
+//! calibration included) over a recording transport.
 use super::test_support::{Frames, RecordingTransport};
 use super::*;
 use crate::protocol::convert::{raw_to_db, raw_to_distance};
@@ -29,6 +30,10 @@ const M: &[(&str, &str)] = &[
     ("calib_interf", "FD FC FB FA 02 00 14 00 04 03 02 01"),
     ("save", "FD FC FB FA 02 00 FD 00 04 03 02 01"),
     ("auto_gain", "FD FC FB FA 02 00 EE 00 04 03 02 01"),
+    (
+        "write_0x3f_50db",
+        "FD FC FB FA 08 00 07 00 3F 00 A0 86 01 00 04 03 02 01",
+    ),
 ];
 
 fn m(name: &str) -> Vec<u8> {
@@ -88,6 +93,147 @@ fn assert_subsequence(frames: &[Vec<u8>], names: &[&str]) {
     }
 }
 
+/// Backup hook that accepts every pre-change snapshot (the app's store
+/// is exercised in `api`); the device path is the one the app ships.
+fn ok_backup(_: &SensorParams) -> Result<(), String> {
+    Ok(())
+}
+
+fn calib_3_2_3() -> CalibCoefficients {
+    CalibCoefficients {
+        trigger: 3.0,
+        hold: 2.0,
+        micro: 3.0,
+    }
+}
+
+fn wait_calib_done(rx: &mpsc::Receiver<DeviceEvent>) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match rx
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("calibration ends")
+        {
+            DeviceEvent::CalibDone { .. } => break,
+            DeviceEvent::CalibFailed { error } => panic!("calibration failed: {error}"),
+            _ => {}
+        }
+    }
+}
+
+/// Manual 5.2.6: the read-all chunks of a guarded change, in order. The
+/// first carries ids 0x0001 and 0x0004 first; together they read all 34 ids.
+fn assert_backup_reads(reads: &[Vec<u8>]) {
+    assert_eq!(reads.len(), 34usize.div_ceil(read_chunk_size(0x20)));
+    assert!(value(&reads[0]).starts_with(&[0x01, 0x00, 0x04, 0x00]));
+    let ids: Vec<u8> = reads.iter().flat_map(|r| value(r).to_vec()).collect();
+    assert_eq!(ids, read_params_value(&all_param_ids()));
+    for r in reads {
+        assert_eq!(word(r), 0x0008);
+        assert!(value(r).len() / 2 <= read_chunk_size(0x20));
+    }
+}
+
+/// Settings whose last pair (micro gate 15 = 50 dB) is manual 5.5.2's.
+fn params_5_5_2() -> SensorParams {
+    let mut p = SensorParams::default_for_tests();
+    p.micro_db[15] = 50.0;
+    p
+}
+
+/// Manual 5.5: the write chunks; 0x003F is the last pair of the last one,
+/// byte for byte the 5.5.2 example value.
+fn assert_writes(writes: &[Vec<u8>], p: &SensorParams) {
+    assert_eq!(writes.len(), 34usize.div_ceil(5));
+    for w in writes {
+        assert_eq!(word(w), 0x0007);
+        assert!(value(w).len().is_multiple_of(6) && value(w).len() / 6 <= 5);
+    }
+    let pairs: Vec<u8> = writes.iter().flat_map(|w| value(w).to_vec()).collect();
+    assert_eq!(pairs, write_params_value(&params_to_pairs(p)));
+    let last = value(writes.last().unwrap());
+    assert_eq!(&last[last.len() - 6..last.len() - 4], &[0x3F, 0x00]);
+    if p.micro_db[15] == 50.0 {
+        assert_eq!(last[last.len() - 6..], *value(&m("write_0x3f_50db")));
+    }
+}
+
+/// The app's write path: enable, read x5 (backup), write x7, save, end.
+#[test]
+fn guarded_write_sequence_matches_manual() {
+    let (d, frames, _s, _rx) = open_with(SimOptions::default());
+    let n = snapshot(&frames).len();
+    d.write_params_guarded(&params_5_5_2(), &ok_backup).unwrap();
+    let f = since(&frames, n);
+    let r = 34usize.div_ceil(read_chunk_size(0x20));
+    assert_eq!(f.len(), 1 + r + 7 + 2, "{f:02X?}");
+    assert_eq!(f[0], m("enable_config"));
+    assert_backup_reads(&f[1..1 + r]);
+    assert_writes(&f[1 + r..1 + r + 7], &params_5_5_2());
+    assert_eq!(f[f.len() - 2], m("save"));
+    assert_eq!(f[f.len() - 1], m("end_config"));
+}
+
+/// While streaming, engineering mode is re-sent before end (manual 5.3).
+#[test]
+fn guarded_write_while_streaming_restores_engineering() {
+    let (d, frames, _s, _rx) = open_with(SimOptions::default());
+    d.set_streaming(true).unwrap();
+    let n = snapshot(&frames).len();
+    d.write_params_guarded(&params_5_5_2(), &ok_backup).unwrap();
+    let f = since(&frames, n);
+    let r = 34usize.div_ceil(read_chunk_size(0x20));
+    assert_eq!(f.len(), 1 + r + 7 + 3, "{f:02X?}");
+    assert_eq!(f[0], m("enable_config"));
+    assert_backup_reads(&f[1..1 + r]);
+    assert_writes(&f[1 + r..1 + r + 7], &params_5_5_2());
+    assert_eq!(
+        f[f.len() - 3..],
+        [m("save"), m("mode_eng"), m("end_config")]
+    );
+}
+
+/// Before v3.3.2 there is no permanent save: no 0x00FD frame at all.
+#[test]
+fn guarded_write_old_firmware_sends_no_save() {
+    let (d, frames, _s, _rx) = open_with(SimOptions {
+        version: "v3.3.1".into(),
+        ..Default::default()
+    });
+    let n = snapshot(&frames).len();
+    d.write_params_guarded(&params_5_5_2(), &ok_backup).unwrap();
+    let f = since(&frames, n);
+    let r = 34usize.div_ceil(read_chunk_size(0x20));
+    assert_eq!(f.len(), 1 + r + 7 + 1, "{f:02X?}");
+    assert!(f.iter().all(|x| word(x) != 0x00FD), "no save on v3.3.1");
+    assert_eq!(f[0], m("enable_config"));
+    assert_backup_reads(&f[1..1 + r]);
+    assert_writes(&f[1 + r..1 + r + 7], &params_5_5_2());
+    assert_eq!(f[f.len() - 1], m("end_config"));
+}
+
+/// The app's calibration path: enable, read x5 (backup), start,
+/// progress..., interference, end (manual 5.2.9-5.2.11).
+#[test]
+fn guarded_calibration_sequence_matches_manual() {
+    let (d, frames, sim, rx) = open_with(SimOptions::default());
+    let n = snapshot(&frames).len();
+    d.start_calibration_guarded(calib_3_2_3(), &ok_backup)
+        .unwrap();
+    wait_calib_done(&rx);
+    let f = since(&frames, n);
+    let r = 34usize.div_ceil(read_chunk_size(0x20));
+    assert_eq!(f[0], m("enable_config"));
+    assert_backup_reads(&f[1..1 + r]);
+    assert_eq!(f[1 + r], m("calib_3_2_3"));
+    let mid = &f[2 + r..f.len() - 2];
+    assert!(!mid.is_empty());
+    assert!(mid.iter().all(|x| *x == m("calib_progress")));
+    assert_eq!(f[f.len() - 2], m("calib_interf"));
+    assert_eq!(f[f.len() - 1], m("end_config"));
+    assert!(!sim.in_config());
+}
+
 #[test]
 fn open_emits_manual_frames() {
     let (_d, frames, _s, _rx) = open_with(SimOptions::default());
@@ -138,42 +284,11 @@ fn streaming_emits_mode_frames() {
 }
 
 #[test]
-fn calibration_emits_manual_frames() {
-    let (d, frames, sim, rx) = open_with(SimOptions::default());
-    let n = snapshot(&frames).len();
-    d.start_calibration(CalibCoefficients {
-        trigger: 3.0,
-        hold: 2.0,
-        micro: 3.0,
-    })
-    .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        match rx
-            .recv_timeout(deadline - Instant::now())
-            .expect("calibration ends")
-        {
-            DeviceEvent::CalibDone { .. } => break,
-            DeviceEvent::CalibFailed { error } => panic!("calibration failed: {error}"),
-            _ => {}
-        }
-    }
-    let f = since(&frames, n);
-    assert_eq!(f[0], m("enable_config"));
-    assert_eq!(f[1], m("calib_3_2_3"));
-    let mid = &f[2..f.len() - 2];
-    assert!(!mid.is_empty());
-    assert!(mid.iter().all(|x| *x == m("calib_progress")));
-    assert_eq!(f[f.len() - 2], m("calib_interf"));
-    assert_eq!(f[f.len() - 1], m("end_config"));
-    assert!(!sim.in_config());
-}
-
-#[test]
 fn save_and_auto_gain_frames() {
     let (d, frames, _s, _rx) = open_with(SimOptions::default());
     let n = snapshot(&frames).len();
-    d.write_params(&SensorParams::default_for_tests()).unwrap();
+    d.write_params_guarded(&SensorParams::default_for_tests(), &ok_backup)
+        .unwrap();
     let f = since(&frames, n);
     assert_eq!(f[f.len() - 2], m("save"));
     assert_eq!(f[f.len() - 1], m("end_config"));
@@ -182,29 +297,6 @@ fn save_and_auto_gain_frames() {
     d.auto_gain().unwrap();
     let f = since(&frames, n);
     assert_eq!(f, vec![m("enable_config"), m("auto_gain"), m("end_config")]);
-}
-
-#[test]
-fn write_sequence_matches_manual_5_5() {
-    let (d, frames, _s, _rx) = open_with(SimOptions::default());
-    let n = snapshot(&frames).len();
-    d.write_params(&SensorParams::default_for_tests()).unwrap();
-    let f = since(&frames, n);
-    assert_eq!(f[0], m("enable_config"));
-    assert_eq!(f[f.len() - 2], m("save"));
-    assert_eq!(f[f.len() - 1], m("end_config"));
-    let writes = &f[1..f.len() - 2];
-    assert_eq!(writes.len(), 34usize.div_ceil(5));
-    for w in writes {
-        assert_eq!(word(w), 0x0007);
-        assert!(value(w).len().is_multiple_of(6) && value(w).len() / 6 <= 5);
-    }
-    let last = value(writes.last().unwrap());
-    assert!(
-        last.chunks_exact(6)
-            .any(|c| u16::from_le_bytes([c[0], c[1]]) == 0x003F),
-        "last write chunk must contain id 0x003F"
-    );
 }
 
 #[test]
@@ -228,6 +320,15 @@ fn read_param_frame_matches_5_2_6() {
             .chunks_exact(2)
             .any(|c| c == [0x3F, 0x00])
     );
+}
+
+#[test]
+fn write_param_encoder_matches_5_5_2() {
+    assert_eq!(
+        encode_command(0x0007, &write_params_value(&[(0x003F, 0x0001_86A0)])),
+        m("write_0x3f_50db")
+    );
+    assert_eq!(crate::protocol::convert::db_to_raw(50.0), 0x0001_86A0);
 }
 
 #[test]
@@ -281,21 +382,15 @@ fn manual_ack_examples_decode() {
 fn every_recorded_frame_passes_the_guard() {
     let (d, frames, _s, rx) = open_with(SimOptions::default());
     d.read_params().unwrap();
-    d.write_params(&SensorParams::default_for_tests()).unwrap();
+    d.write_params_guarded(&SensorParams::default_for_tests(), &ok_backup)
+        .unwrap();
     d.set_streaming(true).unwrap();
+    d.write_params_guarded(&SensorParams::default_for_tests(), &ok_backup)
+        .unwrap();
     d.set_streaming(false).unwrap();
-    d.start_calibration(CalibCoefficients {
-        trigger: 3.0,
-        hold: 2.0,
-        micro: 3.0,
-    })
-    .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while !matches!(
-        rx.recv_timeout(deadline - Instant::now())
-            .expect("calibration ends"),
-        DeviceEvent::CalibDone { .. }
-    ) {}
+    d.start_calibration_guarded(calib_3_2_3(), &ok_backup)
+        .unwrap();
+    wait_calib_done(&rx);
     d.auto_gain().unwrap();
     drop(d);
     let f = snapshot(&frames);
