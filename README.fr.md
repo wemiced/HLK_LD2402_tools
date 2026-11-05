@@ -59,6 +59,34 @@ N'utilisez pas de niveaux logiques 5 V.
 - Coefficients de calibration : plus le coefficient est élevé, plus le capteur est sensible (1,0 à 20,0).
 - L'import nécessite un capteur connecté.
 
+## Sécurité du capteur
+
+L'application est conçue pour ne jamais mettre le capteur dans un état que le manuel ne décrit pas.
+
+- **Liste fermée de commandes.** Seuls les 13 mots de commande documentés dans le manuel peuvent être envoyés (version, début/fin de configuration, numéro de série, lecture/écriture des paramètres, mode de sortie, calibration démarrage/progression/interférences, sauvegarde, gain automatique). La vérification est dans le cœur Rust (`src-tauri/src/protocol/safety.rs`) et s'applique à chaque requête et à la détection de port. Une trame interdite n'est jamais écrite : la requête échoue avec le type d'erreur `forbidden`.
+- **Aucune écriture du firmware ou du numéro de série.** Aucune commande permettant cela n'est dans la liste. Le numéro de série est seulement lu (commande `0x0011`, qui répond en texte avec un firmware 3.3.5 ou plus récent, et en hexadécimal sur les anciens).
+- **Valeurs bornées.** Seuls les paramètres documentés peuvent être lus ou écrits, et chaque valeur écrite est vérifiée par rapport à la plage du manuel (par exemple distance max de 7 à 100, seuils jusqu'à 95 dB, coefficients de calibration de 1,0 à 20,0). Ces limites sont appliquées dans le cœur Rust, pas seulement dans l'interface.
+- **Conformité au manuel.** Des tests automatiques (`src-tauri/src/device/conformity_tests.rs`) comparent chaque trame émise aux exemples du manuel (sections 5.2.x, 5.3, 5.4 et 5.5).
+- **Toujours remis en mode normal.** Le capteur est remis en mode normal à la déconnexion ou à la fermeture.
+
+### Sauvegardes et restauration
+
+L'application garde une copie des réglages de votre capteur, par numéro de série, dans le dossier de données de l'application, sous `snapshots/<série>/` :
+
+- Linux : `~/.local/share/io.github.ld2402studio.app/snapshots`
+- macOS : `~/Library/Application Support/io.github.ld2402studio.app/snapshots`
+- Windows : `%APPDATA%\io.github.ld2402studio.app\snapshots`
+
+Contenu : `original.json` (les réglages au premier branchement, jamais écrasé) et jusqu'à 10 fichiers `backup-*.json`. Une sauvegarde des réglages actuels est faite à l'intérieur de chaque écriture et de chaque calibration ; si elle échoue, rien n'est écrit.
+
+Dans la carte des paramètres, **Restaurer…** propose « Réglages au premier branchement » et « Avant la dernière modification ». Vous vérifiez les valeurs avant toute écriture. Les valeurs hors des plages du manuel sont listées et ramenées dans la plage. Si le capteur n'a pas de numéro de série, un avertissement signale que la sauvegarde peut provenir d'un autre capteur.
+
+Ce ne sont **pas des réglages d'usine** : le protocole n'a pas de commande de retour aux réglages d'usine ; la sauvegarde du premier branchement est ce que l'application peut offrir de plus proche, et seulement si le capteur n'avait pas déjà été modifié avant votre première utilisation de l'application.
+
+### Gain automatique
+
+Le gain automatique demande une confirmation et **ne peut pas être annulé depuis l'application**. Le manuel ne dit pas si le nouveau gain survit à une coupure d'alimentation.
+
 ## Fichier de configuration
 
 Les fichiers exportés ressemblent à ceci (distance arrondie à 0,1 m, dB à 0,01) :

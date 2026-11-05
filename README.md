@@ -59,6 +59,34 @@ Do not use 5 V logic levels.
 - Calibration coefficients: a higher coefficient makes the sensor more sensitive (1.0 to 20.0).
 - Import requires a connected sensor.
 
+## Sensor safety
+
+The app is built so that it cannot put the sensor in a state the manual does not describe.
+
+- **Closed list of commands.** Only the 13 command words documented in the manual can ever be sent (version, enable/end configuration, serial number, read/write parameters, output mode, calibration start/progress/interference, save, auto-gain). The check lives in the Rust core (`src-tauri/src/protocol/safety.rs`) and runs on every request and during port detection. A forbidden frame is never written: the request fails with the error kind `forbidden`.
+- **No firmware or serial-number writes.** No command that could write firmware or the serial number is in the list. The serial number is only read (command `0x0011`, which answers in text on firmware 3.3.5 and later and in hex on older firmware).
+- **Bounded values.** Only the documented parameters can be read or written, and every written value is checked against the manual's range (for example max distance 7 to 100, thresholds up to 95 dB, calibration coefficients 1.0 to 20.0). These limits are enforced in the Rust core, not only in the interface.
+- **Conformity to the manual.** Automated tests (`src-tauri/src/device/conformity_tests.rs`) compare every frame the app emits with the examples of the manual (sections 5.2.x, 5.3, 5.4 and 5.5).
+- **Always back to normal mode.** The sensor is put back in normal mode when you disconnect or quit.
+
+### Snapshots and Restore
+
+The app keeps a copy of your sensor's settings, per serial number, in the app data folder, in `snapshots/<serial>/`:
+
+- Linux: `~/.local/share/io.github.ld2402studio.app/snapshots`
+- macOS: `~/Library/Application Support/io.github.ld2402studio.app/snapshots`
+- Windows: `%APPDATA%\io.github.ld2402studio.app\snapshots`
+
+Contents: `original.json` (the settings at the first connection, never overwritten) and up to 10 `backup-*.json` files. A backup of the current settings is taken inside every write and every calibration; if the backup fails, nothing is written.
+
+In the parameters card, **Restore…** offers "Settings at first connection" and "Before the last change". You review the values before anything is written. Values outside the manual's ranges are listed and clamped back into range. If the sensor has no serial number, a warning tells you the snapshot may come from another sensor.
+
+These are **not factory settings**: the protocol has no factory-reset command, so the first-connection snapshot is the closest the app can offer, and only if the sensor was not already modified before you first used this app.
+
+### Auto-gain
+
+Auto-gain asks for confirmation and **cannot be undone from the app**. The manual does not say whether the new gain survives a power cycle.
+
 ## Configuration file
 
 Exported files look like this (distance rounded to 0.1 m, dB to 0.01):
