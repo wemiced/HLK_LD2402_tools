@@ -2,3 +2,10 @@ node_modules/
 dist/
 src-tauri/target/
 .superpowers/
+dist-ssr
+*.local
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store

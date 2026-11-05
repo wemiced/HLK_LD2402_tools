@@ -1,0 +1,25 @@
+{
+  "name": "ld2402-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-opener": "^2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "jsdom": "^27.0.1",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^3.2.7"
+  }
+}
