@@ -553,3 +553,42 @@ fn guarded_calibration_backs_up_then_runs() {
     assert_eq!(*seen.lock().unwrap(), vec![a]);
     assert!(sent_word(&frames, 0x0009));
 }
+
+/// A change that fails inside config (here a failed backup) while
+/// streaming still puts engineering mode back, so the live view resumes.
+#[test]
+fn failed_change_while_streaming_resumes_engineering() {
+    let (d, frames, h) = open_recording_with_sim();
+    d.set_streaming(true).unwrap();
+    assert!(h.engineering());
+    let n = frames.lock().unwrap().len();
+    let r = d.write_params_guarded(&modified(&h), &|_: &SensorParams| Err("disk full".into()));
+    assert!(matches!(r, Err(DeviceError::BackupFailed { .. })));
+    assert!(h.engineering(), "engineering mode must be restored");
+    assert!(!h.in_config());
+    let tail: Vec<u16> = frames.lock().unwrap()[n..]
+        .iter()
+        .map(|f| u16::from_le_bytes([f[6], f[7]]))
+        .collect();
+    assert_eq!(&tail[tail.len() - 2..], &[CMD_OUTPUT_MODE, CMD_END_CONFIG]);
+    let last_mode = frames.lock().unwrap()[n..]
+        .iter()
+        .rev()
+        .find(|f| u16::from_le_bytes([f[6], f[7]]) == CMD_OUTPUT_MODE)
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        last_mode,
+        encode_command(CMD_OUTPUT_MODE, &mode_value(MODE_ENGINEERING))
+    );
+    // Not streaming: a failed change sends no mode frame.
+    d.set_streaming(false).unwrap();
+    let n = frames.lock().unwrap().len();
+    let r = d.write_params_guarded(&modified(&h), &|_: &SensorParams| Err("disk full".into()));
+    assert!(matches!(r, Err(DeviceError::BackupFailed { .. })));
+    assert!(
+        frames.lock().unwrap()[n..]
+            .iter()
+            .all(|f| u16::from_le_bytes([f[6], f[7]]) != CMD_OUTPUT_MODE)
+    );
+}

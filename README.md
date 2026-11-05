@@ -53,7 +53,7 @@ Do not use 5 V logic levels.
 
 ## Usage tips
 
-- Pick the port, click **Connect**. The sensor is put in engineering mode for the live view, and always put back in normal mode when you disconnect or quit.
+- Pick the port, click **Connect**. The sensor is put in engineering mode for the live view, and put back in normal mode when you disconnect or quit (best effort: not possible if the link is lost or the app crashes).
 - Edits are **drafts**: nothing is sent to the sensor until you press **Write**. On firmware 3.3.2 and later, Write also saves the values permanently; on older firmware, whether they survive a power cycle is still to be verified on hardware.
 - Drag a threshold handle on the chart to change it; the value is still a draft until written.
 - Calibration coefficients: a higher coefficient makes the sensor more sensitive (1.0 to 20.0).
@@ -65,9 +65,9 @@ The app is built so that it cannot put the sensor in a state the manual does not
 
 - **Closed list of commands.** Only the 13 command words documented in the manual can ever be sent (version, enable/end configuration, serial number, read/write parameters, output mode, calibration start/progress/interference, save, auto-gain). The check lives in the Rust core (`src-tauri/src/protocol/safety.rs`) and runs on every request and during port detection. A forbidden frame is never written: the request fails with the error kind `forbidden`.
 - **No firmware or serial-number writes.** No command that could write firmware or the serial number is in the list. The serial number is only read (command `0x0011`, which answers in text on firmware 3.3.5 and later and in hex on older firmware).
-- **Bounded values.** Only the documented parameters can be read or written, and every written value is checked against the manual's range (for example max distance 7 to 100, thresholds up to 95 dB, calibration coefficients 1.0 to 20.0). These limits are enforced in the Rust core, not only in the interface.
-- **Conformity to the manual.** Automated tests (`src-tauri/src/device/conformity_tests.rs`) compare every frame the app emits with the examples of the manual (sections 5.2.x, 5.3, 5.4 and 5.5).
-- **Always back to normal mode.** The sensor is put back in normal mode when you disconnect or quit.
+- **Bounded values.** Only the documented parameters can be read or written, and every written value is checked against the manual's range (for example max distance 0.7 to 10 m, thresholds up to 95 dB, calibration coefficients 1.0 to 20.0). These limits are enforced in the Rust core, not only in the interface.
+- **Conformity to the manual.** Automated tests (`src-tauri/src/device/conformity_tests.rs`) check that every frame type the app emits matches the manual's byte examples, and that the read, write, calibration and streaming sequences (including the backup taken before each change) follow sections 5.2, 5.3 and 5.5.
+- **Back to normal mode.** The sensor is put back in normal mode when you disconnect or quit. This is best effort: if the USB link is lost or the app crashes, the sensor stays in its current mode until the next connection, which puts it back in normal mode first.
 
 ### Snapshots and Restore
 
@@ -77,7 +77,7 @@ The app keeps a copy of your sensor's settings, per serial number, in the app da
 - macOS: `~/Library/Application Support/io.github.ld2402studio.app/snapshots`
 - Windows: `%APPDATA%\io.github.ld2402studio.app\snapshots`
 
-Contents: `original.json` (the settings at the first connection, never overwritten) and up to 10 `backup-*.json` files. A backup of the current settings is taken inside every write and every calibration; if the backup fails, nothing is written.
+Contents: `original.json` (the settings at the first connection, never overwritten) and up to 10 `backup-*.json` files. A backup of the current settings is taken inside every write and every calibration; if the backup fails, nothing is written. If `original.json` could not be saved at connection, it is saved from those same pre-change values at the first write or calibration.
 
 In the parameters card, **Restore…** offers "Settings at first connection" and "Before the last change". You review the values before anything is written. Values outside the manual's ranges are listed and clamped back into range. If the sensor has no serial number, a warning tells you the snapshot may come from another sensor.
 

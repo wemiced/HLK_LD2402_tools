@@ -108,12 +108,15 @@ pub fn write_params_value(pairs: &[(u16, u32)]) -> Vec<u8> {
         .collect()
 }
 
+/// Ids per read frame: what the ACK's values fit in `buffer`, capped to the
+/// guard's per-frame limit.
 pub fn read_chunk_size(buffer: u16) -> usize {
-    (usize::from(buffer).saturating_sub(2) / 4).max(1)
+    (usize::from(buffer).saturating_sub(2) / 4).clamp(1, super::safety::MAX_READ_IDS)
 }
 
+/// Pairs per write frame, capped to the guard's per-frame limit.
 pub fn write_chunk_size(buffer: u16) -> usize {
-    (usize::from(buffer).saturating_sub(2) / 6).max(1)
+    (usize::from(buffer).saturating_sub(2) / 6).clamp(1, super::safety::MAX_WRITE_PAIRS)
 }
 
 /// Checks the ACK bit and status 0; returns the bytes after the status.

@@ -13,7 +13,7 @@ import { confirmDiscardIfDirty, currentEpoch, guarded, isLive, performWrite } fr
 const TEMPLATE = `
 <div class="card">
   <div class="row"><h3 data-i18n="params.title"></h3><div class="grow"></div>
-    <button class="btn ghost sm" data-role="reload">↻ <span data-i18n="params.reread"></span></button></div>
+    <button class="btn ghost sm" style="white-space:nowrap;flex:none" data-role="reload">↻ <span data-i18n="params.reread"></span></button></div>
   <div class="field">
     <div class="top"><label for="p-dist" data-i18n="params.maxDistance"></label><span class="val" data-role="distVal"></span></div>
     <input type="range" id="p-dist" min="0.7" max="10" step="0.1" data-role="dist">

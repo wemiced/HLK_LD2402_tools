@@ -1,11 +1,13 @@
-import { previewRestore, snapshotStatus } from "../api";
+import { previewRestore } from "../api";
 import { formatNumber, getLocale, t } from "../i18n";
 import { app, canEdit, onConnected, onDisconnect, subscribeState } from "../state/store";
 import type { ClampedField, RestorePreview, SnapshotKind, SnapshotMeta } from "../types";
 import { errorMessageOf } from "./errors";
 import { openModal } from "./modal";
 import { toast } from "./notify";
-import { confirmDiscardIfDirty, currentEpoch, guarded, isLive, performWrite } from "./writeFlow";
+import {
+  confirmDiscardIfDirty, currentEpoch, dropPendingSnapshotStatus, guarded, isLive, performWrite, refreshSnapshotStatus,
+} from "./writeFlow";
 
 export function formatSavedAt(iso: string): string {
   const d = new Date(iso);
@@ -57,29 +59,15 @@ function confirmBody(p: RestorePreview): HTMLElement {
   return box;
 }
 
-let statusSeq = 0;
-/** Fetches the snapshot status for the current connection into the store (stale results dropped). */
-export async function refreshSnapshotStatus(): Promise<void> {
-  if (app.get().connection !== "connected") return;
-  const ep = currentEpoch();
-  const seq = ++statusSeq;
-  try {
-    const status = await snapshotStatus();
-    if (isLive(ep) && seq === statusSeq) app.set({ snapshots: status });
-  } catch {
-    /* disconnected or unavailable: the Restore button simply stays disabled */
-  }
-}
-
 /**
  * Keeps `app.snapshots` current: refreshed whenever the sensor values are
- * (re)loaded on a live connection (initial read, write, restore, calibration),
- * cleared on disconnect.
+ * (re)loaded on a live connection (initial read, write, restore, calibration)
+ * and after every write attempt (see `performWrite`), cleared on disconnect.
  */
 export function installSnapshotStatus(): void {
   subscribeStateSensor();
   onConnected(() => { void refreshSnapshotStatus(); });
-  onDisconnect(() => { statusSeq++; app.set({ snapshots: null }); });
+  onDisconnect(() => { dropPendingSnapshotStatus(); app.set({ snapshots: null }); });
 }
 function subscribeStateSensor(): void {
   let prev = app.get().sensor;

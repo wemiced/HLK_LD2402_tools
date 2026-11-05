@@ -144,5 +144,6 @@ section[data-view="calibration"] .card{align-self:start}
 .callout.warn{background:rgba(255,180,84,.12);border-color:var(--micro)}
 .callout ul.clamped{margin:8px 0 0;padding-left:18px;font-size:12px}
 .callout ul.clamped li{margin:2px 0}
-.actions{grid-template-columns:repeat(auto-fit,minmax(128px,1fr))}
-.actions .btn{justify-content:center;white-space:nowrap}
+/* Wrapping row: buttons share each line, so one left alone on the last line spans it in full. */
+.actions{display:flex;flex-wrap:wrap}
+.actions .btn{flex:1 1 128px;justify-content:center;white-space:nowrap}

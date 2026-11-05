@@ -246,3 +246,22 @@ it("snapshot_status_lifecycle", async () => {
   await wait();
   expect(app.get().snapshots).toBeNull();
 });
+
+it("failed_write_after_backup_refreshes_snapshot_status", async () => {
+  installSnapshotStatus();
+  const draft = { ...params, maxDistanceM: 4 };
+  app.set({ draft });
+  // The backup was saved, then the write itself failed: the sensor is unchanged.
+  const after = { ...status, latestBackup: { ...meta("backup"), savedAt: "2026-11-05T11:00:00Z" } };
+  h.snapshotStatus.mockResolvedValue(after);
+  h.writeParams.mockRejectedValue(new h.ApiError({ kind: "nack", word: 7, status: 1 }));
+  await wait();
+  const calls = h.snapshotStatus.mock.calls.length;
+  el.querySelector<HTMLButtonElement>('[data-role="write"]')!.click();
+  await wait();
+  expect(h.writeParams).toHaveBeenCalledWith(draft);
+  expect(app.get().sensor).toBe(params);
+  expect(h.toast).toHaveBeenCalledWith("error", expect.any(String));
+  expect(h.snapshotStatus.mock.calls.length).toBeGreaterThan(calls);
+  expect(app.get().snapshots).toEqual(after);
+});

@@ -10,6 +10,11 @@ pub struct Forbidden {
     pub reason: &'static str,
 }
 
+/// The sensor's command buffer is 0x20 bytes (manual 5.2.2 ACK): a frame
+/// value holds at most 5 (id u16, value u32) write pairs or 15 read ids.
+pub const MAX_WRITE_PAIRS: usize = 5;
+pub const MAX_READ_IDS: usize = 15;
+
 pub const ALLOWED_WORDS: [u16; 13] = [
     CMD_READ_VERSION,
     CMD_ENABLE_CONFIG,
@@ -71,6 +76,9 @@ pub fn check(word: u16, value: &[u8]) -> Result<(), Forbidden> {
             if value.is_empty() || !value.len().is_multiple_of(2) {
                 return forbid(word, "read-params needs a list of u16 ids");
             }
+            if value.len() / 2 > MAX_READ_IDS {
+                return forbid(word, "too many parameter ids in one read");
+            }
             if !value
                 .chunks_exact(2)
                 .all(|c| readable_param(u16::from_le_bytes([c[0], c[1]])))
@@ -81,6 +89,9 @@ pub fn check(word: u16, value: &[u8]) -> Result<(), Forbidden> {
         CMD_WRITE_PARAMS => {
             if value.is_empty() || !value.len().is_multiple_of(6) {
                 return forbid(word, "write-params needs (id u16, value u32) pairs");
+            }
+            if value.len() / 6 > MAX_WRITE_PAIRS {
+                return forbid(word, "too many parameters in one write");
             }
             for c in value.chunks_exact(6) {
                 let id = u16::from_le_bytes([c[0], c[1]]);
@@ -116,7 +127,8 @@ pub fn check(word: u16, value: &[u8]) -> Result<(), Forbidden> {
 mod tests {
     use super::*;
     use crate::protocol::commands::{
-        SensorParams, params_to_pairs, write_chunk_size, write_params_value,
+        SensorParams, all_param_ids, params_to_pairs, read_chunk_size, read_params_value,
+        write_chunk_size, write_params_value,
     };
 
     #[test]
@@ -189,6 +201,32 @@ mod tests {
         assert!(check(0x0007, &[0x10, 0, 0xFF, 0xFF, 0xFF, 0xFF]).is_err());
         assert!(check(0x0007, &[0x01, 0, 7, 0, 0]).is_err());
     }
+    /// Payload caps for the sensor's 0x20 buffer: at most 5 write pairs
+    /// and 15 read ids per frame.
+    #[test]
+    fn payload_length_caps() {
+        let pairs =
+            |n: u16| write_params_value(&(0..n).map(|i| (0x0010 + i, 0)).collect::<Vec<_>>());
+        let ids = |n: u16| read_params_value(&(0..n).map(|i| 0x0010 + i).collect::<Vec<_>>());
+        assert_eq!(check(0x0007, &pairs(5)), Ok(()));
+        assert!(check(0x0007, &pairs(6)).is_err());
+        assert_eq!(check(0x0008, &ids(15)), Ok(()));
+        assert!(check(0x0008, &ids(16)).is_err());
+        // The app's chunking stays within the caps whatever buffer the
+        // enable-config ACK announces.
+        for buffer in [0u16, 0x08, 0x20, 0x40, 0x100, u16::MAX] {
+            assert!((1..=5).contains(&write_chunk_size(buffer)), "{buffer:#x}");
+            assert!((1..=15).contains(&read_chunk_size(buffer)), "{buffer:#x}");
+            for c in all_param_ids().chunks(read_chunk_size(buffer)) {
+                assert_eq!(check(0x0008, &read_params_value(c)), Ok(()));
+            }
+            let p = SensorParams::default_for_tests();
+            for c in params_to_pairs(&p).chunks(write_chunk_size(buffer)) {
+                assert_eq!(check(0x0007, &write_params_value(c)), Ok(()));
+            }
+        }
+    }
+
     #[test]
     fn every_clamped_params_set_passes() {
         let mut s: u64 = 0x2402;

@@ -505,21 +505,32 @@ impl Device {
     }
 
     /// enable → body → (engineering again if streaming and `restore`) → end.
-    /// On failure, config is ended best effort.
+    /// On failure, config is ended best effort; a failed body first puts
+    /// engineering mode back (same condition) so the live view resumes.
     fn in_config<T>(
         &self,
         restore: bool,
         body: impl FnOnce(u16) -> Result<T, DeviceError>,
     ) -> Result<T, DeviceError> {
-        let r = self.enable_config().and_then(body).and_then(|v| {
-            if restore && self.streaming.load(Ordering::SeqCst) {
-                self.link
-                    .cmd(CMD_OUTPUT_MODE, &mode_value(MODE_ENGINEERING))?;
-            }
-            self.link.cmd(CMD_END_CONFIG, &[])?;
-            Ok(v)
-        });
+        let restore = restore && self.streaming.load(Ordering::SeqCst);
+        let mut body_failed = false;
+        let r = self
+            .enable_config()
+            .and_then(|buffer| body(buffer).inspect_err(|_| body_failed = true))
+            .and_then(|v| {
+                if restore {
+                    self.link
+                        .cmd(CMD_OUTPUT_MODE, &mode_value(MODE_ENGINEERING))?;
+                }
+                self.link.cmd(CMD_END_CONFIG, &[])?;
+                Ok(v)
+            });
         if r.is_err() {
+            if restore && body_failed {
+                let _ = self
+                    .link
+                    .quick(CMD_OUTPUT_MODE, &mode_value(MODE_ENGINEERING));
+            }
             let _ = self.link.quick(CMD_END_CONFIG, &[]);
         }
         r
