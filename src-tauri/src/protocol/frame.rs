@@ -228,19 +228,116 @@ mod tests {
         let out = FrameDecoder::new().push(&bytes);
         assert_eq!(out, vec![Inbound::Cmd(CmdFrame { word: 0x0100, payload: vec![] })]);
     }
+    const ACK: &str = "FD FC FB FA 04 00 FE 01 00 00 04 03 02 01";
+    fn ack_item() -> Inbound {
+        Inbound::Cmd(CmdFrame { word: 0x01FE, payload: hex("00 00") })
+    }
+
+    #[test]
+    fn text_between_frames() {
+        let mut bytes = hex(ACK);
+        bytes.extend_from_slice(b"OFF\r\n");
+        bytes.extend_from_slice(&hex(ACK));
+        let out = FrameDecoder::new().push(&bytes);
+        assert_eq!(out, vec![ack_item(), Inbound::Text(TextReport::Off), ack_item()]);
+    }
+    #[test]
+    fn text_before_and_after_frame_in_one_push() {
+        let mut bytes = b"distance:5\r\n".to_vec();
+        bytes.extend_from_slice(&hex(ACK));
+        bytes.extend_from_slice(b"OFF\r\n");
+        let out = FrameDecoder::new().push(&bytes);
+        assert_eq!(out, vec![Inbound::Text(TextReport::Distance(5)), ack_item(), Inbound::Text(TextReport::Off)]);
+    }
+    #[test]
+    fn garbage_with_newline_before_frame() {
+        let mut bytes = vec![0x41, 0x0A, 0x00, 0x0A, 0x13];
+        bytes.extend_from_slice(&hex(ACK));
+        assert_eq!(FrameDecoder::new().push(&bytes), vec![ack_item()]);
+    }
+    #[test]
+    fn header_split_mid_header() {
+        let ack = hex(ACK);
+        let mut d = FrameDecoder::new();
+        assert!(d.push(&ack[..2]).is_empty());
+        assert!(d.push(&ack[2..3]).is_empty());
+        assert_eq!(d.push(&ack[3..]), vec![ack_item()]);
+    }
+    #[test]
+    fn command_length_over_256_rejected_and_resyncs() {
+        let mut bytes = hex("FD FC FB FA 01 01");
+        bytes.extend_from_slice(&hex(ACK));
+        assert_eq!(FrameDecoder::new().push(&bytes), vec![ack_item()]);
+    }
+    #[test]
+    fn long_unterminated_stream_is_capped_and_recovers() {
+        let mut d = FrameDecoder::new();
+        for _ in 0..10 {
+            assert!(d.push(&[b'A'; 1000]).is_empty());
+            assert!(d.buf.len() <= 4096);
+        }
+        assert_eq!(d.buf.len(), 4096);
+        assert_eq!(d.push(&hex(ACK)), vec![ack_item()]);
+    }
+
     #[test]
     fn fuzz_never_panics() {
-        let mut d = FrameDecoder::new();
         let mut state: u64 = 0x1234_5678_9ABC_DEF0;
         let mut next = move || {
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             (state >> 33) as u32
         };
+        // Pure random chunks: must never panic.
+        let mut d = FrameDecoder::new();
         for _ in 0..10_000 {
             let len = (next() % 65) as usize;
             let chunk: Vec<u8> = (0..len).map(|_| next() as u8).collect();
             let _ = d.push(&chunk);
             assert!(d.buf.len() <= 4096);
         }
+
+        // Structured stream: noise (no header-start bytes, newline-terminated), invalid
+        // frames and valid frames, randomly re-chunked. Valid items must be recovered.
+        let eng = hex(MANUAL_ENG_SAMPLE);
+        let eng_item = FrameDecoder::new().push(&eng).remove(0);
+        let mut stream = Vec::new();
+        let mut expected = Vec::new();
+        for _ in 0..2_000 {
+            let n = next() % 12;
+            for _ in 0..n {
+                let b = next() as u8;
+                stream.push(if b == 0xFD || b == 0xF4 { 0x41 } else { b });
+            }
+            stream.push(0x0A);
+            match next() % 6 {
+                0 => {
+                    stream.extend_from_slice(&hex(ACK));
+                    expected.push(ack_item());
+                }
+                1 => {
+                    stream.extend_from_slice(&eng);
+                    expected.push(eng_item.clone());
+                }
+                2 => {
+                    stream.extend_from_slice(b"OFF\r\n");
+                    expected.push(Inbound::Text(TextReport::Off));
+                }
+                3 => stream.extend_from_slice(&hex("F4 F3 F2 F1 05 00")),
+                4 => stream.extend_from_slice(&hex("FD FC FB FA 01 01")),
+                _ => stream.extend_from_slice(&hex("FD FC FB FA 02 00 00 00 04 03 02 99")),
+            }
+        }
+        let mut d = FrameDecoder::new();
+        let mut got = Vec::new();
+        let mut i = 0;
+        while i < stream.len() {
+            let end = (i + 1 + (next() % 64) as usize).min(stream.len());
+            got.extend(d.push(&stream[i..end]));
+            assert!(d.buf.len() <= 4096);
+            i = end;
+        }
+        let first_diff = got.iter().zip(&expected).position(|(g, e)| g != e);
+        assert_eq!((got.len(), first_diff), (expected.len(), None));
+        assert_eq!(got, expected);
     }
 }
