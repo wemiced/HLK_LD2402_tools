@@ -99,5 +99,7 @@
   "errors.unknown": "Unexpected error.",
   "errors.config.notAConfig": "This file is not an LD2402 configuration.",
   "errors.config.unsupportedVersion": "Unsupported configuration version {version}.",
-  "errors.config.outOfRange": "Value out of range for {field}."
+  "errors.config.outOfRange": "Value out of range for {field}.",
+  "status.preview": "Preview with unsaved thresholds: {state}",
+  "status.waiting": "Waiting for data…"
 }

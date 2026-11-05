@@ -101,3 +101,8 @@ td input{width:76px;background:var(--surface-2);border:1px solid var(--border);b
 .port{display:flex;align-items:center;gap:6px}
 .iconbtn{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}
 .iconbtn:hover{color:var(--text)}
+/* dashboard */
+.orb.idle{background:var(--surface-2)} .orb.idle::before{animation:none;opacity:.2;border-color:var(--muted)} .orb.idle i{background:var(--muted)}
+.kv .preview{margin-top:2px;font-size:12px;color:var(--accent);font-weight:500}
+.status .big{min-width:5ch}
+@media (max-width:1100px){.content{grid-template-columns:1fr}.status{grid-template-columns:auto 1fr auto;gap:16px}}

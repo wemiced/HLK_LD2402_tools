@@ -99,5 +99,7 @@
   "errors.unknown": "Erreur inattendue.",
   "errors.config.notAConfig": "Ce fichier n'est pas une configuration LD2402.",
   "errors.config.unsupportedVersion": "Version de configuration {version} non prise en charge.",
-  "errors.config.outOfRange": "Valeur hors limites pour {field}."
+  "errors.config.outOfRange": "Valeur hors limites pour {field}.",
+  "status.preview": "Aperçu avec les seuils non écrits : {state}",
+  "status.waiting": "En attente de données…"
 }
