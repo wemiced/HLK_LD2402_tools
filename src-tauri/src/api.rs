@@ -320,9 +320,10 @@ fn emit_event(app: &AppHandle, ev: DeviceEvent) {
         DeviceEvent::Frame(raw) => app.emit("device://frame", frame_dto(&raw)),
         DeviceEvent::Text(_) => Ok(()),
         DeviceEvent::CalibProgress(p) => app.emit("device://calib-progress", p),
-        DeviceEvent::CalibDone { gates } => {
-            app.emit("device://calib-done", serde_json::json!({ "gates": gates }))
-        }
+        DeviceEvent::CalibDone { gates, strong } => app.emit(
+            "device://calib-done",
+            serde_json::json!({ "gates": gates, "strong": strong }),
+        ),
         DeviceEvent::CalibFailed { error } => app.emit(
             "device://calib-failed",
             serde_json::json!({ "error": error }),

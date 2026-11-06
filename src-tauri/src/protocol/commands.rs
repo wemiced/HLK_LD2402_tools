@@ -189,6 +189,26 @@ pub fn parse_progress(rest: &[u8]) -> Result<u8, ProtocolError> {
     }
 }
 
+/// Calibration interference ACK (manual 5.2.11): status 0 = no interference,
+/// 1 = interference (regenerate advised), both followed by the gate mask.
+/// Returns `(strong, gates)`; any other status is a refusal.
+pub fn parse_interference_ack(f: &CmdFrame) -> Result<(bool, Vec<u8>), ProtocolError> {
+    if f.word & ACK_BIT == 0 {
+        return Err(ProtocolError::UnexpectedWord(f.word));
+    }
+    let [s0, s1, rest @ ..] = f.payload.as_slice() else {
+        return Err(ProtocolError::Malformed("ack too short"));
+    };
+    let status = u16::from_le_bytes([*s0, *s1]);
+    if status > 1 {
+        return Err(ProtocolError::Nack {
+            word: f.word & !ACK_BIT,
+            status,
+        });
+    }
+    Ok((status == 1, parse_interference(rest)?))
+}
+
 /// Bit i of the LE u16 mask marks gate i as disturbed.
 pub fn parse_interference(rest: &[u8]) -> Result<Vec<u8>, ProtocolError> {
     let [a, b, ..] = rest else {
@@ -293,6 +313,28 @@ mod tests {
         assert_eq!(parse_sn_text(&hex("04 00 31 41 32 42")), "1A2B");
         assert_eq!(parse_sn_text(&[]), "");
     }
+    #[test]
+    fn interference_ack_status_one_is_a_result_not_a_refusal() {
+        // Manual 5.2.11: status 0 = no interference, 1 = interference, both
+        // followed by the gate mask. Hardware: 1 must not end as a NACK.
+        let f = |status: u8| CmdFrame {
+            word: CMD_CALIB_INTERFERENCE | ACK_BIT,
+            payload: vec![status, 0, 0x02, 0x84],
+        };
+        assert_eq!(
+            parse_interference_ack(&f(0)).unwrap(),
+            (false, vec![1, 10, 15])
+        );
+        assert_eq!(
+            parse_interference_ack(&f(1)).unwrap(),
+            (true, vec![1, 10, 15])
+        );
+        assert!(matches!(
+            parse_interference_ack(&f(2)),
+            Err(ProtocolError::Nack { status: 2, .. })
+        ));
+    }
+
     #[test]
     fn interference_mask() {
         assert_eq!(parse_interference(&hex("02 84")).unwrap(), vec![1, 10, 15]);

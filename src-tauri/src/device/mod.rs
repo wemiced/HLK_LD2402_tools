@@ -18,6 +18,9 @@ const ACK_BIT: u16 = 0x0100;
 const ACK_TIMEOUT: Duration = Duration::from_millis(500);
 const ACK_ATTEMPTS: u32 = 2;
 const CLEANUP_TIMEOUT: Duration = Duration::from_millis(300);
+/// How long `open` keeps retrying a sensor that does not answer yet
+/// (seen on hardware right after power-up).
+const BOOT_GRACE: Duration = Duration::from_millis(2000);
 /// Longest an auto-gain run keeps the device Busy without its 0x00F0 report.
 const AUTO_GAIN_LIMIT: Duration = Duration::from_secs(30);
 const CALIB_POLL: Duration = Duration::from_millis(500);
@@ -93,10 +96,19 @@ pub enum DeviceEvent {
     Frame(RawEngineering),
     Text(TextReport),
     CalibProgress(u8),
-    CalibDone { gates: Vec<u8> },
-    CalibFailed { error: DeviceError },
+    /// `strong`: the sensor reported interference (status 1), so it advises
+    /// running the calibration again.
+    CalibDone {
+        gates: Vec<u8>,
+        strong: bool,
+    },
+    CalibFailed {
+        error: DeviceError,
+    },
     AutoGainDone,
-    Disconnected { reason: String },
+    Disconnected {
+        reason: String,
+    },
 }
 
 type Reply = Result<CmdFrame, DeviceError>;
@@ -312,7 +324,10 @@ fn worker_loop(
 
 /// Polls progress until 100 % and returns the disturbed gates (config still
 /// open), or `None` when `stop` fires (cleanup is then left to `close`).
-fn poll_calibration(link: &Link, stop: &Receiver<()>) -> Result<Option<Vec<u8>>, DeviceError> {
+fn poll_calibration(
+    link: &Link,
+    stop: &Receiver<()>,
+) -> Result<Option<(bool, Vec<u8>)>, DeviceError> {
     loop {
         if !matches!(
             stop.recv_timeout(CALIB_POLL),
@@ -323,8 +338,8 @@ fn poll_calibration(link: &Link, stop: &Receiver<()>) -> Result<Option<Vec<u8>>,
         let p = parse_progress(&link.cmd(CMD_CALIB_PROGRESS, &[])?).map_err(proto_err)?;
         link.emit(DeviceEvent::CalibProgress(p));
         if p >= 100 {
-            let rest = link.cmd(CMD_CALIB_INTERFERENCE, &[])?;
-            return parse_interference(&rest).map(Some).map_err(proto_err);
+            let f = link.request(CMD_CALIB_INTERFERENCE, &[], ACK_TIMEOUT, ACK_ATTEMPTS)?;
+            return parse_interference_ack(&f).map(Some).map_err(proto_err);
         }
     }
 }
@@ -334,7 +349,7 @@ fn poll_calibration(link: &Link, stop: &Receiver<()>) -> Result<Option<Vec<u8>>,
 fn run_calibration(link: &Link, stop: &Receiver<()>, busy: &AtomicBool) {
     let outcome = match poll_calibration(link, stop) {
         Ok(None) => None,
-        Ok(Some(gates)) => Some(link.cmd(CMD_END_CONFIG, &[]).map(|_| gates)),
+        Ok(Some(found)) => Some(link.cmd(CMD_END_CONFIG, &[]).map(|_| found)),
         Err(e) => {
             let _ = link.quick(CMD_END_CONFIG, &[]);
             Some(Err(e))
@@ -342,7 +357,7 @@ fn run_calibration(link: &Link, stop: &Receiver<()>, busy: &AtomicBool) {
     };
     busy.store(false, Ordering::SeqCst);
     match outcome {
-        Some(Ok(gates)) => link.emit(DeviceEvent::CalibDone { gates }),
+        Some(Ok((strong, gates))) => link.emit(DeviceEvent::CalibDone { gates, strong }),
         // Transport death already emitted `Disconnected`.
         Some(Err(DeviceError::Disconnected)) | None => {}
         Some(Err(error)) => link.emit(DeviceEvent::CalibFailed { error }),
@@ -351,7 +366,8 @@ fn run_calibration(link: &Link, stop: &Receiver<()>, busy: &AtomicBool) {
 
 /// Reads identity while recovering the sensor into a known state.
 /// If the recovery enable gets no ACK, one more quick enable is tried (still
-/// ignored), so an unresponsive sensor fails on the version read in ~1.9 s.
+/// ignored), so one attempt on an unresponsive sensor fails on the version
+/// read in ~1.9 s; `open` retries it while within `BOOT_GRACE`.
 /// `entered` is set once an enable was ACKed, so a failed open can clean up.
 fn identify(link: &Link, entered: &mut bool) -> Result<DeviceInfo, DeviceError> {
     *entered = link.quick(CMD_ENABLE_CONFIG, &ENABLE_VALUE).is_ok()
@@ -437,7 +453,16 @@ impl Device {
             })?;
         let link = Link { tx, dead };
         let mut entered = false;
-        let info = match identify(&link, &mut entered) {
+        // A sensor powered up a moment ago ignores commands while it boots:
+        // keep trying for BOOT_GRACE before reporting that nothing answered.
+        let boot_deadline = Instant::now() + BOOT_GRACE;
+        let identified = loop {
+            match identify(&link, &mut entered) {
+                Err(DeviceError::Timeout { .. }) if Instant::now() < boot_deadline => continue,
+                r => break r,
+            }
+        };
+        let info = match identified {
             Ok(v) => v,
             Err(e) => {
                 if entered {

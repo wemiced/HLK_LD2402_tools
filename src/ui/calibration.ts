@@ -63,6 +63,7 @@ export function mountCalibration(el: HTMLElement): void {
   let step: Step = "prepare";
   let progress = 0;
   let gates: number[] = [];
+  let strong = false;
   let wasStreaming = false;
   // bumped on every disconnect / new run so stale async work can bail out
   let epoch = 0;
@@ -113,9 +114,13 @@ export function mountCalibration(el: HTMLElement): void {
       if (gates.includes(i)) s.className = "bad";
       box.appendChild(s);
     }
-    const clean = gates.length === 0;
-    q("result-title").textContent = t(clean ? "calib.noInterference" : "calib.resultMinor");
-    q("result-body").textContent = clean ? t("calib.noInterferenceBody") : t("calib.resultBody", { count: gates.length });
+    const clean = !strong && gates.length === 0;
+    q("result-title").textContent = t(strong ? "calib.resultStrong" : clean ? "calib.noInterference" : "calib.resultMinor");
+    q("result-body").textContent = strong
+      ? t("calib.strongBody")
+      : clean
+        ? t("calib.noInterferenceBody")
+        : t("calib.resultBody", { count: gates.length });
   }
 
   function goto(next: Step): void {
@@ -160,6 +165,7 @@ export function mountCalibration(el: HTMLElement): void {
     const ep = ++epoch;
     progress = 0;
     gates = [];
+    strong = false;
     wasStreaming = app.get().streaming;
     goto("measure");
     arm();
@@ -198,6 +204,7 @@ export function mountCalibration(el: HTMLElement): void {
     const ep = epoch;
     stopWatchdog();
     gates = d.gates;
+    strong = d.strong === true;
     progress = 100;
     goto("result");
     try {
@@ -219,6 +226,7 @@ export function mountCalibration(el: HTMLElement): void {
     wasStreaming = false;
     progress = 0;
     gates = [];
+    strong = false;
     goto("prepare");
   });
   subscribeState(render);

@@ -22,6 +22,11 @@ pub struct SimOptions {
     pub fail_after_reads: Option<usize>,
     /// Withholds the 0x00F0 auto-gain completion until `SimHandle::finish_auto_gain`.
     pub hold_auto_gain_done: bool,
+    /// Ignores every command for this long after creation, like a sensor
+    /// that is still booting right after power-up.
+    pub boot_delay: Option<Duration>,
+    /// Status of the 0x0014 interference ACK (0 = none, 1 = interference).
+    pub interference_status: u16,
 }
 
 impl Default for SimOptions {
@@ -33,6 +38,8 @@ impl Default for SimOptions {
             start_in_config: false,
             fail_after_reads: None,
             hold_auto_gain_done: false,
+            boot_delay: None,
+            interference_status: 0,
         }
     }
 }
@@ -117,6 +124,7 @@ struct State {
     out: VecDeque<u8>,
     person: Person,
     last_emit: Instant,
+    created: Instant,
 }
 
 fn ack(word: u16, status: u16, rest: &[u8]) -> Vec<u8> {
@@ -206,7 +214,11 @@ impl State {
                 self.calib_progress = (self.calib_progress + 10).min(100);
                 ack(w, 0, &self.calib_progress.to_le_bytes())
             }
-            CMD_CALIB_INTERFERENCE => ack(w, 0, &PERTURBED_MASK.to_le_bytes()),
+            CMD_CALIB_INTERFERENCE => ack(
+                w,
+                self.opts.interference_status,
+                &PERTURBED_MASK.to_le_bytes(),
+            ),
             CMD_SAVE => {
                 self.saved = true;
                 ack(w, 0, &[])
@@ -273,6 +285,7 @@ impl SimSensor {
             out: VecDeque::new(),
             person: Person::new(),
             last_emit: Instant::now(),
+            created: Instant::now(),
             opts,
         };
         Self {
@@ -331,6 +344,9 @@ impl Transport for SimSensor {
     fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
         let mut st = lock(&self.shared);
         if st.opts.unresponsive {
+            return Ok(());
+        }
+        if st.opts.boot_delay.is_some_and(|d| st.created.elapsed() < d) {
             return Ok(());
         }
         for item in st.decoder.push(data) {

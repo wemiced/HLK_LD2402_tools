@@ -103,6 +103,8 @@ export type ApiErrorData = DeviceError | ConfigError;
 
 export interface CalibDone {
   gates: number[];
+  /** The sensor reported interference (status 1) and advises calibrating again. */
+  strong?: boolean;
 }
 
 export interface CalibFailed {

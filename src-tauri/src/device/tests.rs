@@ -197,7 +197,10 @@ fn calibration_reports_progress_and_gates() {
         let left = end.saturating_duration_since(Instant::now());
         match rx.recv_timeout(left).expect("CalibDone within 10 s") {
             DeviceEvent::CalibProgress(p) => progress.push(p),
-            DeviceEvent::CalibDone { gates } => break gates,
+            DeviceEvent::CalibDone { gates, strong } => {
+                assert!(!strong);
+                break gates;
+            }
             _ => {}
         }
     };
@@ -340,10 +343,23 @@ fn unresponsive_open_times_out() {
     });
     assert_eq!(d.err(), Some(DeviceError::Timeout { word: 0x0000 }));
     assert!(
-        start.elapsed() < Duration::from_millis(2500),
+        start.elapsed() < Duration::from_millis(4500),
         "{:?}",
         start.elapsed()
     );
+}
+
+#[test]
+fn open_waits_for_a_sensor_that_is_still_booting() {
+    // Hardware validation: right after power-up the LD2402 ignores commands
+    // for a moment, so the first Connect failed with "no LD2402 answered".
+    let (d, h, _rx) = try_open(SimOptions {
+        boot_delay: Some(Duration::from_millis(1500)),
+        ..Default::default()
+    });
+    let d = d.expect("open succeeds once the sensor has booted");
+    assert_eq!(d.info().firmware, "v3.3.5");
+    assert!(!h.in_config());
 }
 
 #[test]
@@ -591,4 +607,28 @@ fn failed_change_while_streaming_resumes_engineering() {
             .iter()
             .all(|f| u16::from_le_bytes([f[6], f[7]]) != CMD_OUTPUT_MODE)
     );
+}
+
+#[test]
+fn calibration_with_strong_interference_reports_it_instead_of_failing() {
+    let (d, h, rx) = try_open(SimOptions {
+        interference_status: 1,
+        ..Default::default()
+    });
+    let d = d.unwrap();
+    d.start_calibration(coeffs()).unwrap();
+    let end = Instant::now() + Duration::from_secs(10);
+    let done = loop {
+        let left = end.saturating_duration_since(Instant::now());
+        match rx
+            .recv_timeout(left)
+            .expect("a calibration outcome within 10 s")
+        {
+            DeviceEvent::CalibDone { gates, strong } => break (gates, strong),
+            DeviceEvent::CalibFailed { error } => panic!("failed: {error:?}"),
+            _ => {}
+        }
+    };
+    assert_eq!(done, (vec![1, 10, 15], true));
+    assert!(!h.in_config());
 }

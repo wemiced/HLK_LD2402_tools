@@ -69,6 +69,8 @@
   "calib.coefHold": "Coefficient de maintien",
   "calib.coefHint": "Plus le coefficient est élevé, plus le capteur est sensible (1,0 à 20,0).",
   "calib.start": "Démarrer",
+  "calib.resultStrong": "Résultat · interférences fortes",
+  "calib.strongBody": "Le capteur signale des interférences importantes pendant la mesure : quelqu'un ou quelque chose a probablement bougé. Videz la zone et relancez la calibration.",
   "calib.resultMinor": "Résultat · interférences mineures détectées",
   "calib.resultBody": "Les seuils ont été générés et appliqués. Des perturbations ont été vues sur {count} portes : un objet qui bouge (ventilateur, rideau) peut en être la cause.",
   "calib.retry": "Recommencer",

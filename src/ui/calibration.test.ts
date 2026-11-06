@@ -91,6 +91,16 @@ it("done with no gates says no interference", async () => {
   expect(q("result-title").textContent).toBe("No interference");
 });
 
+it("done with strong interference asks to calibrate again", async () => {
+  q("start").click();
+  await wait();
+  h.cb.done({ gates: [0, 1], strong: true } as never);
+  await wait();
+  expect(q("result-title").textContent).toBe("Result · strong interference");
+  expect(q("result-body").textContent).toContain("run the calibration again");
+  expect(el.querySelectorAll(".gates .bad").length).toBe(2);
+});
+
 it("pauses streaming and restores it afterwards", async () => {
   app.set({ streaming: true });
   q("start").click();

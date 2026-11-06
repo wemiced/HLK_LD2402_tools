@@ -69,6 +69,8 @@
   "calib.coefHold": "Hold coefficient",
   "calib.coefHint": "Higher coefficient = more sensitive (1.0 to 20.0).",
   "calib.start": "Start",
+  "calib.resultStrong": "Result · strong interference",
+  "calib.strongBody": "The sensor reported significant interference during the measurement: someone or something probably moved. Clear the area and run the calibration again.",
   "calib.resultMinor": "Result · minor interference detected",
   "calib.resultBody": "Thresholds were generated and applied. Disturbances were seen on {count} gates: a moving object (fan, curtain) may be the cause.",
   "calib.retry": "Restart",
