@@ -21,6 +21,7 @@ const h = vi.hoisted(() => {
     open: vi.fn(),
     toast: vi.fn(),
     close: vi.fn(async () => {}),
+    destroy: vi.fn(async () => {}),
     closeCb: null as null | ((e: unknown) => Promise<void>),
   };
 });
@@ -40,6 +41,7 @@ vi.mock("@tauri-apps/api/window", () => ({
       return () => {};
     },
     close: h.close,
+    destroy: h.destroy,
   }),
 }));
 vi.mock("./notify", () => ({ toast: h.toast, showBanner: vi.fn(), hideBanner: vi.fn() }));
@@ -61,7 +63,7 @@ const q = <T extends HTMLElement>(role: string) => el.querySelector<T>(`[data-ro
 
 beforeEach(async () => {
   setLocale("en");
-  for (const m of [h.readParams, h.writeParams, h.exportConfig, h.importConfig, h.ask, h.save, h.open, h.toast, h.close]) m.mockReset();
+  for (const m of [h.readParams, h.writeParams, h.exportConfig, h.importConfig, h.ask, h.save, h.open, h.toast, h.close, h.destroy]) m.mockReset();
   h.readParams.mockResolvedValue(params);
   h.writeParams.mockResolvedValue(undefined);
   h.ask.mockResolvedValue(true);
@@ -185,13 +187,13 @@ it("close_handler_confirm_closes_once_cancel_keeps", async () => {
   expect(e1.preventDefault).toHaveBeenCalled();
   expect(h.close).not.toHaveBeenCalled();
   h.ask.mockResolvedValue(true);
-  await h.closeCb!(ev());
-  expect(h.close).toHaveBeenCalledTimes(1);
-  h.ask.mockClear();
-  const e3 = ev();
-  await h.closeCb!(e3);
-  expect(h.ask).not.toHaveBeenCalled();
-  expect(e3.preventDefault).not.toHaveBeenCalled();
+  const e2 = ev();
+  await h.closeCb!(e2);
+  expect(e2.preventDefault).toHaveBeenCalled();
+  // destroy, not close: close() would re-enter this handler and the JS
+  // wrapper's fallback destroy() is what actually tears the window down
+  expect(h.destroy).toHaveBeenCalledTimes(1);
+  expect(h.close).not.toHaveBeenCalled();
 });
 
 it("Write/Re-read/Import are disabled while calibrating or auto-gaining; a write marks paramsBusy", async () => {

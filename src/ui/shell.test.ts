@@ -28,6 +28,7 @@ const h = vi.hoisted(() => {
     listPorts: vi.fn(),
     connect: vi.fn(),
     disconnect: vi.fn(),
+    ask: vi.fn(),
   };
 });
 
@@ -41,6 +42,8 @@ vi.mock("../api", () => ({
     return () => {};
   }),
 }));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({ ask: h.ask }));
 
 import { setLocale } from "../i18n";
 import { app } from "../state/store";
@@ -63,6 +66,7 @@ beforeEach(async () => {
   document.querySelectorAll(".toasts").forEach((e) => e.remove());
   h.connect.mockReset().mockResolvedValue(h.info);
   h.disconnect.mockReset().mockResolvedValue(undefined);
+  h.ask.mockReset().mockResolvedValue(true);
   app.set({ connection: "disconnected", info: null, port: null, view: "dashboard" });
   setLocale("en");
   await mount();
@@ -125,6 +129,28 @@ it("user disconnect sets state directly without an event", async () => {
   expect(h.disconnect).toHaveBeenCalled();
   expect(app.get().connection).toBe("disconnected");
   expect(app.get().info).toBeNull();
+});
+
+it("discarding on disconnect drops the edits so reconnecting does not ask again", async () => {
+  const sensor = { maxDistanceM: 5, disappearDelayS: 30, triggerDb: Array(16).fill(40), microDb: Array(16).fill(30) };
+  connectBtn().click();
+  await flush();
+  app.set({ sensor, draft: { ...sensor, maxDistanceM: 6 } });
+  h.ask.mockResolvedValue(false);
+  connectBtn().click();
+  await flush();
+  expect(app.get().connection).toBe("connected");
+  expect(app.get().draft!.maxDistanceM).toBe(6);
+  h.ask.mockResolvedValue(true);
+  connectBtn().click();
+  await flush();
+  expect(app.get().connection).toBe("disconnected");
+  expect(app.get().draft).toEqual(sensor);
+  h.ask.mockClear();
+  connectBtn().click();
+  await flush();
+  expect(h.ask).not.toHaveBeenCalled();
+  expect(app.get().connection).toBe("connected");
 });
 
 it("language switch re-renders shell text live", () => {

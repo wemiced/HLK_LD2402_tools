@@ -111,17 +111,23 @@ export function mountShell(root: HTMLElement): void {
   // --- connection flow
   // bumped by device://disconnected while connecting: the pending result is stale
   let connectEpoch = 0;
+  /** Ask, and on "discard" really drop the edits so the question is not asked again. */
+  async function confirmDrop(): Promise<boolean> {
+    if (!(await confirmDiscardIfDirty())) return false;
+    app.set({ draft: app.get().sensor });
+    return true;
+  }
   async function toggleConnection(): Promise<void> {
     const s = app.get();
     if (s.connection === "connecting") return;
     if (s.connection === "connected") {
-      if (isDirty(s.sensor, s.draft) && !(await confirmDiscardIfDirty())) return;
+      if (isDirty(s.sensor, s.draft) && !(await confirmDrop())) return;
       try { await disconnect(); } catch { /* state is reset regardless */ }
       app.set({ connection: "disconnected", info: null, streaming: false, lastFrame: null });
       return;
     }
     if (!select.value) return;
-    if (isDirty(s.sensor, s.draft) && !(await confirmDiscardIfDirty())) return;
+    if (isDirty(s.sensor, s.draft) && !(await confirmDrop())) return;
     app.set({ connection: "connecting", port: select.value });
     const ep = ++connectEpoch;
     try {
@@ -150,7 +156,7 @@ export function mountShell(root: HTMLElement): void {
   let lastPort = "";
   select.addEventListener("focus", () => { lastPort = select.value; });
   select.addEventListener("change", async () => {
-    if (lastPort && select.value !== lastPort && !(await confirmDiscardIfDirty())) select.value = lastPort;
+    if (lastPort && select.value !== lastPort && !(await confirmDrop())) select.value = lastPort;
     lastPort = select.value;
     update();
   });

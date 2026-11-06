@@ -46,14 +46,11 @@ export { confirmDiscardIfDirty };
 export async function installCloseGuard(): Promise<void> {
   try {
     const win = getCurrentWindow();
-    let confirmed = false;
     await win.onCloseRequested(async (ev) => {
-      if (confirmed || !dirtyNow()) return;
+      if (!dirtyNow()) return;
       ev.preventDefault();
-      if (await confirmDiscardIfDirty()) {
-        confirmed = true;
-        await win.close();
-      }
+      // destroy, not close: close() would just raise this event again
+      if (await confirmDiscardIfDirty()) await win.destroy();
     });
   } catch {
     /* not running inside Tauri */
