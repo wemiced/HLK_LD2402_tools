@@ -12,9 +12,11 @@ const CALIB_IDLE_MS = 15_000;
 /** Hard cap on a whole calibration, however progress moves. */
 const CALIB_MAX_MS = 120_000;
 const AUTOGAIN_TIMEOUT_MS = 30_000;
-// Coefficient range/default follow the manual ("higher = more sensitive").
-// TODO(hardware): verify the range and default against a real sensor.
-const COEF_MIN = 1, COEF_MAX = 20, COEF_STEP = 0.1, COEF_DEFAULT = 3;
+// Range from the manual. Direction checked on a v3.3.5 sensor (2026-11-09),
+// contrary to the manual: higher coefficient = higher thresholds = LESS
+// sensitive. Coefficient 3 left thresholds 10-15 dB above background; 1.5
+// keeps a small margin over noise.
+const COEF_MIN = 1, COEF_MAX = 20, COEF_STEP = 0.1, COEF_DEFAULT = 1.5;
 const COEFS = [
   { id: "trigger", label: "calib.coefTrigger" },
   { id: "hold", label: "calib.coefHold" },

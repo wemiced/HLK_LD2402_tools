@@ -67,7 +67,7 @@
   "calib.step3Body": "Thresholds applied",
   "calib.coefTrigger": "Trigger coefficient",
   "calib.coefHold": "Hold coefficient",
-  "calib.coefHint": "Higher coefficient = more sensitive (1.0 to 20.0).",
+  "calib.coefHint": "A higher coefficient makes the sensor less sensitive (1.0 to 20.0). 1 to 2 suits most uses.",
   "calib.start": "Start",
   "calib.resultStrong": "Result · strong interference",
   "calib.strongBody": "The sensor reported significant interference during the measurement: someone or something probably moved. Clear the area and run the calibration again.",

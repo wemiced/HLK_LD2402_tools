@@ -101,12 +101,19 @@ it("done with strong interference asks to calibrate again", async () => {
   expect(el.querySelectorAll(".gates .bad").length).toBe(2);
 });
 
+it("defaults to low coefficients and says a higher one is less sensitive", () => {
+  // Measured on a v3.3.5 sensor (2026-11-09): coefficient 3 set thresholds
+  // 10-15 dB above coefficient 1, so higher = higher thresholds = less sensitive.
+  expect(el.querySelector<HTMLInputElement>('[data-role="coef-trigger"]')!.value).toBe("1.5");
+  expect(el.querySelector('[data-i18n="calib.coefHint"]')!.textContent).toContain("less sensitive");
+});
+
 it("pauses streaming and restores it afterwards", async () => {
   app.set({ streaming: true });
   q("start").click();
   await wait();
   expect(h.setStreaming).toHaveBeenCalledWith(false);
-  expect(h.startCalibration).toHaveBeenCalledWith({ trigger: 3, hold: 3, micro: 3 });
+  expect(h.startCalibration).toHaveBeenCalledWith({ trigger: 1.5, hold: 1.5, micro: 1.5 });
   h.cb.done({ gates: [] } as never);
   await wait();
   expect(h.setStreaming).toHaveBeenLastCalledWith(true);
