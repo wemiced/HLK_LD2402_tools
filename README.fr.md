@@ -40,6 +40,8 @@ Puis fermez la session et rouvrez-la.
 
 ## Câblage
 
+Le manuel du HLK-LD2402 est publié par Hi-Link (<https://www.hlktech.net>) et n'est pas inclus dans ce dépôt. Les numéros de sections et de tableaux ci-dessous y renvoient.
+
 Liaison série : 115200 bauds, 8N1. Reliez le capteur à un adaptateur USB-série 3,3 V (manuel, tableau 4-1) :
 
 | Capteur | Adaptateur |

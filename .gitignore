@@ -9,3 +9,11 @@ dist-ssr
 !.vscode/extensions.json
 .idea
 .DS_Store
+
+# Kept locally, not published
+# Vendor manual (Hi-Link copyright): see the link in the README
+resources/
+# Personal setup notes and working documents
+docs/hardware-validation.md
+docs/DEVLOG.md
+docs/superpowers/

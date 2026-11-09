@@ -40,6 +40,8 @@ Then log out and back in.
 
 ## Wiring
 
+The HLK-LD2402 user manual is published by Hi-Link (<https://www.hlktech.net>) and is not included in this repository. Section and table numbers below refer to it.
+
 Serial settings: 115200 baud, 8N1. Connect the sensor to a 3.3 V USB-serial adapter (manual, Table 4-1):
 
 | Sensor | Adapter |
