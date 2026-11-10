@@ -2,7 +2,7 @@
 
 [Français](README.fr.md)
 
-A desktop app to configure, calibrate and monitor the **HLK-LD2402** 24 GHz mmWave radar sensor over a USB-serial adapter. Built with Tauri 2 (Rust core, TypeScript front-end). Works on Windows, macOS and Linux.
+A desktop app to configure, calibrate and monitor the **HLK-LD2402** 24 GHz mmWave radar sensor over a USB-serial adapter. Built with Tauri 2 (Rust core, TypeScript front-end). Builds for Windows, macOS and Linux; so far tested with a real sensor (firmware v3.3.5) on Linux only.
 
 ![LD2402 Studio dashboard](docs/images/dashboard-en.png)
 
@@ -14,23 +14,23 @@ A desktop app to configure, calibrate and monitor the **HLK-LD2402** 24 GHz mmWa
 - Read and write all sensor parameters (max distance, disappear delay, per-gate thresholds).
 - Export and import the configuration as a JSON file.
 - English and French interface; more languages are easy to add (see [CONTRIBUTING.md](CONTRIBUTING.md)).
-- Built-in sensor simulator, so you can try everything without hardware.
+- Built-in sensor simulator, so you can try everything without hardware (see [Simulator](#simulator)).
 
-Firmware update is not available: the update protocol is not public (see [docs/firmware-update-research.md](docs/firmware-update-research.md)).
+The app does not update the sensor firmware: Hi-Link has not published the update protocol.
 
 ## Download and install
 
-Get the installer for your system from the [Releases](../../releases) page: `.msi` / `.exe` (Windows), `.dmg` (macOS), `.deb` / `.AppImage` (Linux).
+Get the installer for your system from the [Releases](../../releases) page: `.msi` / `.exe` (Windows), `.dmg` (macOS), `.deb` / `.rpm` / `.AppImage` (Linux).
 
 The builds are **not code-signed**, so your OS will warn you the first time:
 
 - **macOS**: right-click the app, choose **Open**, then confirm. If macOS still refuses, run `xattr -dr com.apple.quarantine "/Applications/LD2402 Studio.app"`.
 - **Windows**: in the SmartScreen window click **More info**, then **Run anyway**.
-- **Linux**: `sudo apt install ./*.deb`, or `chmod +x *.AppImage` and run it.
+- **Linux**: `sudo apt install ./*.deb` (Debian, Ubuntu), `sudo dnf install ./*.rpm` (Fedora), or `chmod +x *.AppImage` and run it.
 
 ### Linux serial permissions
 
-To open the serial port you must be in the `dialout` group:
+To open the serial port you must be in the `dialout` group (`uucp` on Arch Linux):
 
 ```sh
 sudo usermod -aG dialout $USER
@@ -56,7 +56,7 @@ Do not use 5 V logic levels.
 ## Usage tips
 
 - Pick the port, click **Connect**. The sensor is put in engineering mode for the live view, and put back in normal mode when you disconnect or quit (best effort: not possible if the link is lost or the app crashes).
-- Edits are **drafts**: nothing is sent to the sensor until you press **Write**. On firmware 3.3.2 and later, Write also saves the values permanently; on older firmware, whether they survive a power cycle is still to be verified on hardware.
+- Edits are **drafts**: nothing is sent to the sensor until you press **Write**. On firmware 3.3.2 and later, Write also saves the values permanently; older firmware has no save command, so the values may be lost when the sensor is powered off.
 - Drag a threshold handle on the chart to change it; the value is still a draft until written.
 - Calibration coefficients: a higher coefficient makes the sensor **less** sensitive (1.0 to 20.0, default 1.5). The manual says the opposite; measurements on a v3.3.5 sensor contradict it.
 - Import requires a connected sensor.
@@ -115,7 +115,8 @@ Each array holds 16 numbers, one per gate. Import checks the ranges: distance 0.
 In debug builds, or when `LD2402_SIM=1` is set, a **Simulator** port appears in the port list.
 
 ```sh
-LD2402_SIM=1 ./ld2402-studio
+LD2402_SIM=1 ld2402-studio                   # installed from .deb or .rpm
+LD2402_SIM=1 ./LD2402*.AppImage              # AppImage
 LD2402_SIM_VERSION=v3.3.1 LD2402_SIM=1 ...   # pretend to be another firmware
 LD2402_SIM_FAIL_AFTER=50 LD2402_SIM=1 ...    # drop the link after 50 reads
 ```

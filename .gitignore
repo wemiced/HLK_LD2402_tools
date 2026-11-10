@@ -1,19 +1,11 @@
 node_modules/
 dist/
+dist-ssr
 src-tauri/target/
 .superpowers/
-dist-ssr
+.claude/
 *.local
 *.log
-.vscode/*
-!.vscode/extensions.json
+.vscode/
 .idea
 .DS_Store
-
-# Kept locally, not published
-# Vendor manual (Hi-Link copyright): see the link in the README
-resources/
-# Personal setup notes and working documents
-docs/hardware-validation.md
-docs/DEVLOG.md
-docs/superpowers/

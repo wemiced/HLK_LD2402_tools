@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-Une application de bureau pour configurer, calibrer et surveiller le capteur radar millimétrique 24 GHz **HLK-LD2402** via un adaptateur USB-série. Construite avec Tauri 2 (cœur Rust, interface TypeScript). Fonctionne sous Windows, macOS et Linux.
+Une application de bureau pour configurer, calibrer et surveiller le capteur radar millimétrique 24 GHz **HLK-LD2402** via un adaptateur USB-série. Construite avec Tauri 2 (cœur Rust, interface TypeScript). Compilée pour Windows, macOS et Linux ; testée pour l'instant avec un vrai capteur (firmware v3.3.5) sous Linux uniquement.
 
 ![Tableau de bord LD2402 Studio](docs/images/dashboard-fr.png)
 
@@ -14,23 +14,23 @@ Une application de bureau pour configurer, calibrer et surveiller le capteur rad
 - Lecture et écriture de tous les paramètres du capteur (distance max, délai de disparition, seuils par porte).
 - Export et import de la configuration en fichier JSON.
 - Interface en français et en anglais ; d'autres langues s'ajoutent facilement (voir [CONTRIBUTING.md](CONTRIBUTING.md)).
-- Simulateur de capteur intégré pour tout essayer sans matériel.
+- Simulateur de capteur intégré pour tout essayer sans matériel (voir [Simulateur](#simulateur)).
 
-La mise à jour du firmware n'est pas disponible : le protocole n'est pas public (voir [docs/firmware-update-research.md](docs/firmware-update-research.md)).
+L'application ne met pas à jour le firmware du capteur : Hi-Link n'a pas publié le protocole de mise à jour.
 
 ## Téléchargement et installation
 
-Récupérez l'installeur pour votre système sur la page [Releases](../../releases) : `.msi` / `.exe` (Windows), `.dmg` (macOS), `.deb` / `.AppImage` (Linux).
+Récupérez l'installeur pour votre système sur la page [Releases](../../releases) : `.msi` / `.exe` (Windows), `.dmg` (macOS), `.deb` / `.rpm` / `.AppImage` (Linux).
 
 Les versions ne sont **pas signées** : votre système affichera un avertissement la première fois.
 
 - **macOS** : clic droit sur l'application, **Ouvrir**, puis confirmer. Si macOS refuse encore, lancez `xattr -dr com.apple.quarantine "/Applications/LD2402 Studio.app"`.
 - **Windows** : dans la fenêtre SmartScreen, cliquez sur **Informations complémentaires**, puis **Exécuter quand même**.
-- **Linux** : `sudo apt install ./*.deb`, ou `chmod +x *.AppImage` puis lancez-le.
+- **Linux** : `sudo apt install ./*.deb` (Debian, Ubuntu), `sudo dnf install ./*.rpm` (Fedora), ou `chmod +x *.AppImage` puis lancez-le.
 
 ### Droits d'accès au port série (Linux)
 
-Pour ouvrir le port série, vous devez être dans le groupe `dialout` :
+Pour ouvrir le port série, vous devez être dans le groupe `dialout` (`uucp` sous Arch Linux) :
 
 ```sh
 sudo usermod -aG dialout $USER
@@ -56,7 +56,7 @@ N'utilisez pas de niveaux logiques 5 V.
 ## Conseils d'utilisation
 
 - Choisissez le port puis cliquez sur **Connecter**. Le capteur passe en mode ingénieur pour la vue en direct, et est remis en mode normal à la déconnexion ou à la fermeture (au mieux : impossible si la liaison est perdue ou si l'application plante).
-- Les modifications sont des **brouillons** : rien n'est envoyé au capteur tant que vous n'appuyez pas sur **Écrire**. Avec un firmware 3.3.2 ou plus récent, l'écriture sauvegarde aussi les valeurs de façon permanente ; sur un firmware plus ancien, leur conservation après une coupure d'alimentation reste à vérifier sur le matériel.
+- Les modifications sont des **brouillons** : rien n'est envoyé au capteur tant que vous n'appuyez pas sur **Écrire**. Avec un firmware 3.3.2 ou plus récent, l'écriture sauvegarde aussi les valeurs de façon permanente ; un firmware plus ancien n'a pas de commande de sauvegarde : les valeurs peuvent être perdues quand le capteur est mis hors tension.
 - Faites glisser la poignée d'un seuil sur le graphique pour le changer ; cela reste un brouillon jusqu'à l'écriture.
 - Coefficients de calibration : plus le coefficient est élevé, **moins** le capteur est sensible (1,0 à 20,0, 1,5 par défaut). Le manuel dit l'inverse, mais une mesure sur un capteur v3.3.5 l'a démenti.
 - L'import nécessite un capteur connecté.
@@ -115,7 +115,8 @@ Chaque tableau contient 16 nombres, un par porte. L'import vérifie les plages :
 Dans les versions de débogage, ou avec `LD2402_SIM=1`, un port **Simulator** apparaît dans la liste des ports.
 
 ```sh
-LD2402_SIM=1 ./ld2402-studio
+LD2402_SIM=1 ld2402-studio                   # installé depuis le .deb ou le .rpm
+LD2402_SIM=1 ./LD2402*.AppImage              # AppImage
 LD2402_SIM_VERSION=v3.3.1 LD2402_SIM=1 ...   # se faire passer pour un autre firmware
 LD2402_SIM_FAIL_AFTER=50 LD2402_SIM=1 ...    # coupe la liaison après 50 lectures
 ```

@@ -19,7 +19,7 @@ export function createStore<T extends object>(initial: T) {
   };
 }
 
-export type ViewId = "dashboard" | "calibration" | "firmware";
+export type ViewId = "dashboard" | "calibration";
 
 export interface AppState {
   connection: "disconnected" | "connecting" | "connected";

@@ -31,4 +31,4 @@ The sensor speaks a binary protocol over serial, 115200 8N1 (HLK-LD2402 manual).
 - Parameters are addressed by id: `0x0001` max distance, `0x0004` disappear delay, `0x0010`+ trigger thresholds, `0x0030`+ micro-motion thresholds. Permanent save (`0x00FD`) needs firmware 3.3.2 or later; features are gated by firmware version.
 - Device logic is in `src-tauri/src/device/`; a full simulated sensor (`src-tauri/src/sim.rs`) reproduces the protocol, so most behaviour can be tested without hardware.
 
-Firmware update is intentionally not implemented, see `docs/firmware-update-research.md`.
+Firmware update is intentionally not implemented: the vendor protocol is not public.

@@ -6,6 +6,6 @@ it("subscribers get the previous state and can skip frame-only updates", () => {
   const seen: boolean[] = [];
   s.subscribe((next, prev) => seen.push(onlyFrameChanged(next as AppState, prev as AppState)));
   s.set({ lastFrame: { presence: "none", distanceM: 0, motionDb: [], microDb: [] } });
-  s.set({ view: "firmware" });
+  s.set({ view: "calibration" });
   expect(seen).toEqual([true, false]);
 });

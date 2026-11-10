@@ -72,9 +72,9 @@ beforeEach(async () => {
   await mount();
 });
 
-it("renders 3 view buttons and switches views", () => {
+it("renders 2 view buttons and switches views", () => {
   const btns = root.querySelectorAll<HTMLButtonElement>(".rail button[data-view]");
-  expect(btns.length).toBe(3);
+  expect(btns.length).toBe(2);
   btns[1].click();
   expect(app.get().view).toBe("calibration");
   expect(root.querySelector('section[data-view="calibration"]')).not.toBeNull();
@@ -251,7 +251,7 @@ it("a frame-only update does not rewrite the shell (theme icon kept)", () => {
   const svg = root.querySelector("#theme-toggle svg");
   app.set({ lastFrame: { presence: "none", distanceM: 0, motionDb: [], microDb: [] } });
   expect(root.querySelector("#theme-toggle svg")).toBe(svg);
-  app.set({ view: "firmware" });
+  app.set({ view: "calibration" });
   expect(root.querySelector("#theme-toggle svg")).toBe(svg);
   app.set({ lastFrame: null, view: "dashboard" });
 });

@@ -11,7 +11,6 @@ const ic = (d: string) => `<svg class="i" viewBox="0 0 24 24">${d}</svg>`;
 const VIEWS: { id: ViewId; icon: string }[] = [
   { id: "dashboard", icon: ic('<rect x="3" y="3" width="7" height="9" rx="2"/><rect x="14" y="3" width="7" height="5" rx="2"/><rect x="14" y="12" width="7" height="9" rx="2"/><rect x="3" y="16" width="7" height="5" rx="2"/>') },
   { id: "calibration", icon: ic('<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5"/>') },
-  { id: "firmware", icon: ic('<path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 21h16"/>') },
 ];
 const MOON = ic('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>');
 const SUN = ic('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>');
