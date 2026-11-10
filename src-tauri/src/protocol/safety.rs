@@ -80,8 +80,10 @@ pub fn check(word: u16, value: &[u8]) -> Result<(), Forbidden> {
                 return forbid(word, "too many parameter ids in one read");
             }
             if !value
-                .chunks_exact(2)
-                .all(|c| readable_param(u16::from_le_bytes([c[0], c[1]])))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .all(|c| readable_param(u16::from_le_bytes(*c)))
             {
                 return forbid(word, "unknown parameter id");
             }
@@ -93,7 +95,7 @@ pub fn check(word: u16, value: &[u8]) -> Result<(), Forbidden> {
             if value.len() / 6 > MAX_WRITE_PAIRS {
                 return forbid(word, "too many parameters in one write");
             }
-            for c in value.chunks_exact(6) {
+            for c in value.as_chunks::<6>().0 {
                 let id = u16::from_le_bytes([c[0], c[1]]);
                 let v = u32::from_le_bytes([c[2], c[3], c[4], c[5]]);
                 match write_range(id) {
@@ -108,8 +110,10 @@ pub fn check(word: u16, value: &[u8]) -> Result<(), Forbidden> {
         CMD_CALIB_START => {
             if value.len() != 6
                 || !value
-                    .chunks_exact(2)
-                    .all(|c| (10..=200).contains(&u16::from_le_bytes([c[0], c[1]])))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .all(|c| (10..=200).contains(&u16::from_le_bytes(*c)))
             {
                 return forbid(word, "calibration coefficients must be 10..=200");
             }

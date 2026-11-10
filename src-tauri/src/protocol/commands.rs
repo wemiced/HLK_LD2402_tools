@@ -176,9 +176,11 @@ pub fn parse_param_values(rest: &[u8], n: usize) -> Result<Vec<u32>, ProtocolErr
         return Err(ProtocolError::Malformed("param values too short"));
     }
     Ok(rest
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .take(n)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .map(|c| u32::from_le_bytes(*c))
         .collect())
 }
 

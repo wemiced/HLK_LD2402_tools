@@ -317,8 +317,9 @@ fn read_param_frame_matches_5_2_6() {
     assert!(value(&reads[0]).starts_with(&[0x01, 0x00]));
     assert!(
         value(reads.last().unwrap())
-            .chunks_exact(2)
-            .any(|c| c == [0x3F, 0x00])
+            .as_chunks::<2>()
+            .0
+            .contains(&[0x3F, 0x00])
     );
 }
 

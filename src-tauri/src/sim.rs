@@ -181,8 +181,8 @@ impl State {
             CMD_READ_SN_TEXT => ack(w, 0, &len_prefixed(b"SIM-LD2402-0001")),
             CMD_READ_PARAMS => {
                 let mut vals = vec![];
-                for c in f.payload.chunks_exact(2) {
-                    let id = u16::from_le_bytes([c[0], c[1]]);
+                for c in f.payload.as_chunks::<2>().0 {
+                    let id = u16::from_le_bytes(*c);
                     match self.pairs.iter().find(|(i, _)| *i == id) {
                         Some((_, v)) => vals.extend(v.to_le_bytes()),
                         None => return ack(w, 1, &[]),
@@ -191,7 +191,7 @@ impl State {
                 ack(w, 0, &vals)
             }
             CMD_WRITE_PARAMS => {
-                for c in f.payload.chunks_exact(6) {
+                for c in f.payload.as_chunks::<6>().0 {
                     let id = u16::from_le_bytes([c[0], c[1]]);
                     let v = u32::from_le_bytes([c[2], c[3], c[4], c[5]]);
                     if let Some(p) = self.pairs.iter_mut().find(|(i, _)| *i == id) {
